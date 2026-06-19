@@ -25,15 +25,11 @@ pub struct XTweet {
 
 pub struct XApiClient {
     http: Client,
-    bearer_token: Option<String>,
 }
 
 impl XApiClient {
-    pub fn new(http: Client, config: &Config) -> Self {
-        Self {
-            http,
-            bearer_token: config.x_bearer_token.clone(),
-        }
+    pub fn new(http: Client, _config: &Config) -> Self {
+        Self { http }
     }
 
     pub async fn get_authenticated_user(&self, access_token: &str) -> Result<XUser, ServiceError> {
@@ -62,7 +58,11 @@ impl XApiClient {
             .map_err(|e| ServiceError::Upstream(format!("x users/me parse: {e}")))
     }
 
-    pub async fn get_tweet(&self, tweet_ref: &str, access_token: Option<&str>) -> Result<XTweet, ServiceError> {
+    pub async fn get_tweet(
+        &self,
+        tweet_ref: &str,
+        access_token: &str,
+    ) -> Result<XTweet, ServiceError> {
         let tweet_id = parse_tweet_id(tweet_ref)?;
 
         #[derive(Deserialize)]
@@ -78,22 +78,14 @@ impl XApiClient {
         }
 
         let url = format!("https://api.twitter.com/2/tweets/{tweet_id}");
-        let mut req = self.http.get(&url).query(&[(
-            "tweet.fields",
-            "created_at,author_id,text",
-        )]);
-
-        if let Some(token) = access_token {
-            req = req.bearer_auth(token);
-        } else if let Some(app_token) = &self.bearer_token {
-            req = req.bearer_auth(app_token);
-        } else {
-            return Err(ServiceError::Upstream(
-                "no X bearer token available for tweet lookup".into(),
-            ));
-        }
-
-        let resp = req
+        let resp = self
+            .http
+            .get(&url)
+            .bearer_auth(access_token)
+            .query(&[(
+                "tweet.fields",
+                "created_at,author_id,text",
+            )])
             .send()
             .await
             .map_err(|e| ServiceError::Upstream(format!("x tweet fetch failed: {e}")))?;
@@ -185,9 +177,10 @@ pub fn parse_tweet_id(tweet_ref: &str) -> Result<String, ServiceError> {
 pub fn tweet_contains_profile_link(text: &str, profile_url: &str, username: &str) -> bool {
     let lower = text.to_lowercase();
     let profile_url_lower = profile_url.to_lowercase();
+    let username_lower = username.to_lowercase();
     lower.contains(&profile_url_lower)
-        || lower.contains(&format!("@{username}".to_lowercase()))
-        || lower.contains(&format!("mysocial.network/@{username}".to_lowercase()))
+        || lower.contains(&format!("@{username_lower}"))
+        || lower.contains(&format!("mysocial.network/@{username_lower}"))
 }
 
 #[cfg(test)]

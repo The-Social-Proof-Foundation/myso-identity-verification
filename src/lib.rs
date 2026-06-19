@@ -13,5 +13,6 @@ pub mod relayer;
 pub mod social_graph;
 pub mod state;
 pub mod x_api;
+pub mod x_tokens;
 
-pub use campaigns::share::process_pending_campaigns;
+pub use campaigns::scheduler::run_scheduler;

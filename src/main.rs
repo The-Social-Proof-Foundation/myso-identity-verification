@@ -12,6 +12,7 @@ use axum::Router;
 use redis::Client as RedisClient;
 use reqwest::Client;
 use tokio::signal;
+use tokio_util::sync::CancellationToken;
 use tower_http::cors::CorsLayer;
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::trace::TraceLayer;
@@ -24,8 +25,11 @@ use myso_identity_verification::handlers;
 use myso_identity_verification::indexer::IndexerClient;
 use myso_identity_verification::oauth::x::XOAuthClient;
 use myso_identity_verification::relayer::Relayer;
+use myso_identity_verification::run_scheduler;
 use myso_identity_verification::state::AppState;
 use myso_identity_verification::x_api::XApiClient;
+
+const SCHEDULER_SHUTDOWN_TIMEOUT_SECS: u64 = 5;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -77,16 +81,41 @@ async fn main() -> Result<()> {
         relayer,
     };
 
+    let shutdown = CancellationToken::new();
+    let scheduler_shutdown = shutdown.clone();
+    let scheduler_handle = tokio::spawn(run_scheduler(state.clone(), scheduler_shutdown));
+
     let app = build_router(state, &config.allowed_origins);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], config.port));
     info!("Listening on {addr}");
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
+    let shutdown_for_serve = shutdown.clone();
     axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
+        .with_graceful_shutdown(wait_for_shutdown(shutdown_for_serve))
         .await?;
 
+    match tokio::time::timeout(
+        Duration::from_secs(SCHEDULER_SHUTDOWN_TIMEOUT_SECS),
+        scheduler_handle,
+    )
+    .await
+    {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => {
+            if !e.is_cancelled() {
+                return Err(e.into());
+            }
+        }
+        Err(_) => {
+            info!(
+                "Scheduler shutdown timed out after {SCHEDULER_SHUTDOWN_TIMEOUT_SECS}s, aborting"
+            );
+        }
+    }
+
+    info!("Shutdown complete");
     Ok(())
 }
 
@@ -115,17 +144,34 @@ fn build_router(state: AppState, allowed_origins: &[String]) -> Router {
         .route("/social-graph/x/matches", get(handlers::x_matches))
         .route("/campaigns/share/start", post(handlers::share_start))
         .route("/campaigns/share/status", get(handlers::share_status))
-        .route(
-            "/internal/cron/process-pending-campaigns",
-            post(handlers::process_pending_campaigns_handler),
-        )
         .with_state(state)
         .layer(RequestBodyLimitLayer::new(1024 * 1024))
         .layer(cors)
         .layer(TraceLayer::new_for_http())
 }
 
-async fn shutdown_signal() {
-    let _ = signal::ctrl_c().await;
-    info!("Shutdown signal received");
+async fn wait_for_shutdown(shutdown: CancellationToken) {
+    let signal_name = wait_for_shutdown_signal().await;
+    info!(signal = signal_name, "Shutdown signal received");
+    shutdown.cancel();
+}
+
+async fn wait_for_shutdown_signal() -> &'static str {
+    #[cfg(unix)]
+    {
+        use signal::unix::{signal, SignalKind};
+
+        let mut sigterm = signal(SignalKind::terminate()).expect("register SIGTERM handler");
+
+        tokio::select! {
+            _ = signal::ctrl_c() => "SIGINT",
+            _ = sigterm.recv() => "SIGTERM",
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        let _ = signal::ctrl_c().await;
+        "SIGINT"
+    }
 }

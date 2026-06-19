@@ -140,6 +140,38 @@ impl XOAuthClient {
             .await
             .map_err(|e| ServiceError::Upstream(format!("x token parse failed: {e}")))
     }
+
+    pub async fn refresh_access_token(
+        &self,
+        refresh_token: &str,
+    ) -> Result<XTokenResponse, ServiceError> {
+        let params = [
+            ("grant_type", "refresh_token"),
+            ("refresh_token", refresh_token),
+            ("client_id", self.config.x_client_id.as_str()),
+        ];
+
+        let resp = self
+            .http
+            .post(X_TOKEN_URL)
+            .basic_auth(&self.config.x_client_id, Some(&self.config.x_client_secret))
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .form(&params)
+            .send()
+            .await
+            .map_err(|e| ServiceError::Upstream(format!("x token refresh failed: {e}")))?;
+
+        if !resp.status().is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(ServiceError::Upstream(format!(
+                "x token refresh error: {body}"
+            )));
+        }
+
+        resp.json::<XTokenResponse>()
+            .await
+            .map_err(|e| ServiceError::Upstream(format!("x token refresh parse failed: {e}")))
+    }
 }
 
 fn generate_code_verifier() -> String {
@@ -152,6 +184,3 @@ fn code_challenge_s256(verifier: &str) -> String {
     let digest = Sha256::digest(verifier.as_bytes());
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest)
 }
-
-// rand is not in Cargo.toml - I need to add it or use another method
-// Let me use getrandom + manual instead to avoid extra dep - actually add rand to Cargo.toml

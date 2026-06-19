@@ -5,9 +5,10 @@ use std::str::FromStr;
 
 use anyhow::{Context, Result};
 use move_core_types::identifier::Identifier;
+use myso_sdk::types::object::Owner;
 use myso_sdk::types::base_types::{ObjectID, ObjectRef};
 use myso_sdk::types::programmable_transaction_builder::ProgrammableTransactionBuilder;
-use myso_sdk::types::transaction::{Argument, Command, ObjectArg, ProgrammableTransaction};
+use myso_sdk::types::transaction::{Command, ObjectArg, ProgrammableTransaction};
 use myso_sdk::types::transaction::SharedObjectMutability;
 use myso_sdk::MySoClient;
 
@@ -31,7 +32,7 @@ impl ChainPtb {
         let data = resp.data.context("admin cap missing")?;
         let owner_matches = matches!(
             data.owner,
-            myso_sdk::rpc_types::Owner::AddressOwner(addr) if addr == owner
+            Some(Owner::AddressOwner(addr)) if addr == owner
         );
         anyhow::ensure!(owner_matches, "relayer does not own ecosystem badge admin cap");
         Ok(data.object_ref())
@@ -53,7 +54,7 @@ impl ChainPtb {
         let cap = ptb.obj(ObjectArg::ImmOrOwnedObject(cap_ref))?;
         let profile = ptb.obj(ObjectArg::SharedObject {
             id: profile_id,
-            initial_shared_version: profile_shared_version,
+            initial_shared_version: profile_shared_version.into(),
             mutability: SharedObjectMutability::Mutable,
         })?;
 
@@ -106,7 +107,7 @@ impl ChainPtb {
         let cap = ptb.obj(ObjectArg::ImmOrOwnedObject(cap_ref))?;
         let profile = ptb.obj(ObjectArg::SharedObject {
             id: profile_id,
-            initial_shared_version: profile_shared_version,
+            initial_shared_version: profile_shared_version.into(),
             mutability: SharedObjectMutability::Mutable,
         })?;
 

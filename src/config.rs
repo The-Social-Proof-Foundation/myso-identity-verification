@@ -6,6 +6,8 @@ use std::env;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 
+pub const MYSO_SOCIAL_PACKAGE_ID: &str = "0x50c1";
+
 #[derive(Debug, Clone)]
 pub struct BadgeAssets {
     pub verified_x_description: String,
@@ -24,7 +26,6 @@ pub struct Config {
     pub port: u16,
     pub allowed_origins: Vec<String>,
     pub redis_url: String,
-    pub cron_secret: String,
     pub oauth_state_secret: String,
     pub jwt_signing_key: Option<String>,
     pub mysocial_auth_issuer: Option<String>,
@@ -32,7 +33,7 @@ pub struct Config {
     pub x_client_id: String,
     pub x_client_secret: String,
     pub x_callback_url: String,
-    pub x_bearer_token: Option<String>,
+    pub share_campaign_check_delay_hours: u32,
     pub myso_rpc_url: String,
     pub myso_social_package_id: String,
     pub ecosystem_badge_admin_cap_id: String,
@@ -72,7 +73,6 @@ impl Config {
                 "https://mysocial.network,http://localhost:3000".into()
             })),
             redis_url: env::var("REDIS_URL").context("REDIS_URL not set")?,
-            cron_secret: env::var("CRON_SECRET").context("CRON_SECRET not set")?,
             oauth_state_secret: env::var("OAUTH_STATE_SECRET")
                 .or_else(|_| env::var("JWT_SIGNING_KEY"))
                 .context("OAUTH_STATE_SECRET or JWT_SIGNING_KEY required")?,
@@ -82,10 +82,12 @@ impl Config {
             x_client_id: env::var("X_CLIENT_ID").context("X_CLIENT_ID not set")?,
             x_client_secret: env::var("X_CLIENT_SECRET").context("X_CLIENT_SECRET not set")?,
             x_callback_url: env::var("X_CALLBACK_URL").context("X_CALLBACK_URL not set")?,
-            x_bearer_token: env::var("X_BEARER_TOKEN").ok(),
+            share_campaign_check_delay_hours: env::var("SHARE_CAMPAIGN_CHECK_DELAY_HOURS")
+                .unwrap_or_else(|_| "24".into())
+                .parse()
+                .context("invalid SHARE_CAMPAIGN_CHECK_DELAY_HOURS")?,
             myso_rpc_url: env::var("MYSO_RPC_URL").context("MYSO_RPC_URL not set")?,
-            myso_social_package_id: env::var("MYSO_SOCIAL_PACKAGE_ID")
-                .context("MYSO_SOCIAL_PACKAGE_ID not set")?,
+            myso_social_package_id: MYSO_SOCIAL_PACKAGE_ID.to_string(),
             ecosystem_badge_admin_cap_id: env::var("ECOSYSTEM_BADGE_ADMIN_CAP_ID")
                 .context("ECOSYSTEM_BADGE_ADMIN_CAP_ID not set")?,
             relayer_private_key_hex: env::var("RELAYER_PRIVATE_KEY")

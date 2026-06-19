@@ -4,9 +4,12 @@
 use axum::extract::{Query, State};
 use axum::http::HeaderMap;
 use axum::Json;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-use crate::campaigns::share::{get_share_status, start_share_campaign, ShareCampaignStatus};
+use crate::campaigns::share::{
+    get_all_share_statuses, get_share_status, start_share_campaign, validate_badge_name,
+    ShareCampaignStatus,
+};
 use crate::error::ServiceError;
 use crate::state::AppState;
 
@@ -15,14 +18,23 @@ pub struct ShareStartRequest {
     pub profile_id: String,
     pub badge: String,
     pub tweet_url: String,
-    #[serde(default)]
-    pub x_access_token: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct ShareStatusQuery {
     pub address: String,
-    pub badge: String,
+    #[serde(default)]
+    pub badge: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum ShareStatusResponse {
+    Single(ShareCampaignStatus),
+    All {
+        early_adopter: ShareCampaignStatus,
+        ambassador: ShareCampaignStatus,
+    },
 }
 
 pub async fn share_start(
@@ -37,7 +49,6 @@ pub async fn share_start(
         &body.profile_id,
         &body.badge,
         &body.tweet_url,
-        body.x_access_token.as_deref(),
     )
     .await?;
     Ok(Json(status))
@@ -46,7 +57,20 @@ pub async fn share_start(
 pub async fn share_status(
     State(state): State<AppState>,
     Query(query): Query<ShareStatusQuery>,
-) -> Result<Json<ShareCampaignStatus>, ServiceError> {
-    let status = get_share_status(&state, &query.address, &query.badge).await?;
-    Ok(Json(status))
+) -> Result<Json<ShareStatusResponse>, ServiceError> {
+    match query.badge {
+        Some(badge) => {
+            validate_badge_name(&badge, state.config.is_early_access_active())?;
+            let status = get_share_status(&state, &query.address, &badge).await?;
+            Ok(Json(ShareStatusResponse::Single(status)))
+        }
+        None => {
+            let (early_adopter, ambassador) =
+                get_all_share_statuses(&state, &query.address).await?;
+            Ok(Json(ShareStatusResponse::All {
+                early_adopter,
+                ambassador,
+            }))
+        }
+    }
 }

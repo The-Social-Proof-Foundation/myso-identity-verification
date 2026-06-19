@@ -4,6 +4,7 @@
 use crate::error::ServiceError;
 use crate::indexer::IndexerProfile;
 use crate::state::AppState;
+use crate::x_tokens::XTokenStore;
 
 #[derive(Debug, serde::Serialize)]
 pub struct SocialGraphMatch {
@@ -16,8 +17,6 @@ pub struct SocialGraphMatch {
 pub async fn find_x_matches(
     state: &AppState,
     wallet_address: &str,
-    x_access_token: &str,
-    x_user_id: &str,
 ) -> Result<Vec<SocialGraphMatch>, ServiceError> {
     let _profile = state
         .indexer
@@ -25,9 +24,12 @@ pub async fn find_x_matches(
         .await?
         .ok_or_else(|| ServiceError::not_found("profile not found"))?;
 
+    let access_token = XTokenStore::get_valid_access_token(state, wallet_address).await?;
+    let x_user_id = XTokenStore::get_x_user_id(state, wallet_address).await?;
+
     let following = state
         .x_api
-        .get_following_usernames(x_user_id, x_access_token, 500)
+        .get_following_usernames(&x_user_id, &access_token, 500)
         .await?;
 
     if following.is_empty() {

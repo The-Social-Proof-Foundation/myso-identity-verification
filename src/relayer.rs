@@ -33,9 +33,8 @@ impl Relayer {
             .await
             .context("connect myso rpc")?;
 
-        let key_bytes = hex::decode(config.relayer_private_key_hex.trim())
-            .context("decode RELAYER_PRIVATE_KEY hex")?;
-        let keypair = MySoKeyPair::from_bytes(&key_bytes).context("parse relayer keypair")?;
+        let keypair = parse_relayer_keypair(&config.relayer_private_key_hex)
+            .context("parse RELAYER_PRIVATE_KEY")?;
 
         Ok(Self {
             client,
@@ -126,10 +125,17 @@ impl Relayer {
             ChainPtb::fetch_owned_cap(&self.client, signer, self.admin_cap_id).await?;
         let profile_oid = ChainPtb::parse_object_id(profile_id)?;
 
+        let gas_price = self
+            .client
+            .read_api()
+            .get_reference_gas_price()
+            .await
+            .context("reference gas price")?;
+
         let gas = self
             .client
-            .coin_read_api()
-            .select_gas(signer, None, None, None, None)
+            .transaction_builder()
+            .select_gas(signer, None, 50_000_000, vec![], gas_price)
             .await
             .context("select gas")?;
 
@@ -160,7 +166,7 @@ impl Relayer {
             )?
         };
 
-        self.sign_and_execute(signer, gas.object, ptb).await
+        self.sign_and_execute(signer, gas, ptb).await
     }
 
     pub async fn fetch_profile_shared_version(&self, profile_id: &str) -> Result<u64> {
@@ -173,10 +179,11 @@ impl Relayer {
             .context("fetch profile object")?;
         let data = resp.data.context("profile object missing")?;
         match data.owner {
-            myso_sdk::rpc_types::Owner::Shared { initial_shared_version } => {
-                Ok(initial_shared_version)
-            }
-            other => anyhow::bail!("profile is not a shared object: {other:?}"),
+            Some(myso_sdk::types::object::Owner::Shared {
+                initial_shared_version,
+            }) => Ok(initial_shared_version.into()),
+            Some(other) => anyhow::bail!("profile is not a shared object: {other:?}"),
+            None => anyhow::bail!("profile object missing owner"),
         }
     }
 
@@ -214,5 +221,54 @@ impl Relayer {
             )
             .await
             .context("execute transaction")
+    }
+}
+
+/// Accepts the same formats as `myso keytool` / keystore exports:
+/// - Bech32 `mysoprivkey1...`
+/// - Base64 `flag || privkey`
+/// - Hex `flag || privkey`
+fn parse_relayer_keypair(raw: &str) -> Result<MySoKeyPair> {
+    let contents = raw.trim();
+    if contents.is_empty() {
+        anyhow::bail!("RELAYER_PRIVATE_KEY is empty");
+    }
+
+    if let Ok(key) = MySoKeyPair::decode(contents) {
+        return Ok(key);
+    }
+
+    if let Ok(bytes) = hex::decode(contents) {
+        return MySoKeyPair::from_bytes(&bytes)
+            .map_err(|e| anyhow::anyhow!("invalid hex RELAYER_PRIVATE_KEY: {e}"));
+    }
+
+    anyhow::bail!(
+        "RELAYER_PRIVATE_KEY must be a mysoprivkey1... bech32 string or hex-encoded flag||privkey"
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_mysoprivkey_format() {
+        use myso_sdk::types::base_types::MySoAddress;
+        use std::str::FromStr;
+
+        let key = parse_relayer_keypair(
+            "mysoprivkey1qpekep5ltp9klhcajc25reg4xpxdh6hcu0th3xh8nlg9utva5dzhss4859v",
+        )
+        .expect("bech32 key should parse");
+
+        let address = MySoAddress::from(&key.public());
+        assert_eq!(
+            address,
+            MySoAddress::from_str(
+                "0x2458950181e415250823d6ce1d55f2b3427826a111939e0d6d38e9a1397411d8"
+            )
+            .unwrap()
+        );
     }
 }

@@ -22,7 +22,6 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 COPY --from=builder /app/target/release/myso-identity-verification /app/
-COPY --from=builder /app/target/release/myso-identity-verification-cron /app/
 
 RUN useradd -m -u 1001 appuser && chown -R appuser:appuser /app
 USER appuser

@@ -13,8 +13,6 @@ use crate::state::AppState;
 #[derive(Debug, Deserialize)]
 pub struct MatchesQuery {
     pub address: String,
-    pub x_user_id: String,
-    pub x_access_token: String,
 }
 
 pub async fn x_matches(
@@ -27,13 +25,7 @@ pub async fn x_matches(
         return Err(ServiceError::unauthorized("address does not match session"));
     }
 
-    let matches = find_x_matches(
-        &state,
-        &query.address,
-        &query.x_access_token,
-        &query.x_user_id,
-    )
-    .await?;
+    let matches = find_x_matches(&state, &query.address).await?;
 
     Ok(Json(matches))
 }
