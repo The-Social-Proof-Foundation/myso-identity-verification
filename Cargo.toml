@@ -1,0 +1,42 @@
+[package]
+name = "myso-identity-verification"
+version = "0.1.0"
+edition = "2021"
+default-run = "myso-identity-verification"
+
+[[bin]]
+name = "myso-identity-verification"
+path = "src/main.rs"
+
+[[bin]]
+name = "myso-identity-verification-cron"
+path = "src/bin/process_pending_campaigns.rs"
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+axum = { version = "0.7", features = ["macros"] }
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
+dotenvy = "0.15"
+hex = "0.4"
+rand = "0.8"
+jsonwebtoken = "9"
+redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
+reqwest = { version = "0.12", features = ["json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+myso-sdk = { path = "../myso-core/crates/myso-sdk" }
+shared-crypto = { path = "../myso-core/crates/shared-crypto" }
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace", "limit"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+url = "2"
+urlencoding = "2"
+
+[dev-dependencies]
+tokio-test = "0.4"
