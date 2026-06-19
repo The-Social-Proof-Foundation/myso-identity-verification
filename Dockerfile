@@ -1,8 +1,8 @@
-FROM rust:1.85-bookworm AS builder
+FROM rust:1.94-bookworm AS builder
 
 WORKDIR /app
 
-COPY Cargo.toml ./
+COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 
 RUN git clone --depth 1 https://github.com/the-social-proof-foundation/myso-core /myso-core \
