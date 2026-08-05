@@ -98,7 +98,7 @@ pub async fn x_connect(
 pub async fn x_callback(
     State(state): State<AppState>,
     Query(query): Query<CallbackQuery>,
-) -> Result<Json<CallbackResponse>, ServiceError> {
+) -> Result<Json<serde_json::Value>, ServiceError> {
     let (code, state_jwt) = parse_callback_params(&query)?;
     let oauth_state = state.x_oauth.decode_state(&state_jwt)?;
     let token = state
@@ -113,6 +113,19 @@ pub async fn x_callback(
                 .into(),
         )
     })?;
+
+    if oauth_state.flow == "poc_claim" {
+        return crate::handlers::poc_claim::complete_poc_claim_oauth(
+            &state,
+            &oauth_state,
+            &token.access_token,
+            refresh_token,
+            token.expires_in,
+            &x_user.id,
+            &x_user.username,
+        )
+        .await;
+    }
 
     let mut redis = state.redis.clone();
     crate::x_tokens::XTokenStore::save(
@@ -154,11 +167,11 @@ pub async fn x_callback(
         .await
         .map_err(|e| ServiceError::Internal(e.into()))?;
 
-    Ok(Json(CallbackResponse {
-        status: "verified",
-        tx_digest: resp.digest.to_string(),
-        x_username: x_user.username,
-    }))
+    Ok(Json(serde_json::json!({
+        "status": "verified",
+        "tx_digest": resp.digest.to_string(),
+        "x_username": x_user.username,
+    })))
 }
 
 #[cfg(test)]

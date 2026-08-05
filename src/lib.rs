@@ -9,6 +9,8 @@ pub mod error;
 pub mod handlers;
 pub mod indexer;
 pub mod oauth;
+pub mod poc_claim;
+pub mod poc_tokens;
 pub mod relayer;
 pub mod social_graph;
 pub mod state;

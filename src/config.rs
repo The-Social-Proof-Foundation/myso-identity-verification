@@ -42,6 +42,8 @@ pub struct Config {
     pub early_access_ends_at: Option<DateTime<Utc>>,
     pub badge_assets: BadgeAssets,
     pub profile_url_template: String,
+    pub allow_poc_claim_attestation: bool,
+    pub poc_service_secret: Option<String>,
 }
 
 impl Config {
@@ -97,6 +99,11 @@ impl Config {
             early_access_ends_at,
             profile_url_template: env::var("PROFILE_URL_TEMPLATE")
                 .unwrap_or_else(|_| "https://mysocial.network/@{username}".into()),
+            allow_poc_claim_attestation: env::var("ALLOW_POC_CLAIM_ATTESTATION")
+                .unwrap_or_else(|_| "true".into())
+                .parse()
+                .unwrap_or(true),
+            poc_service_secret: env::var("POC_SERVICE_SECRET").ok().filter(|s| !s.trim().is_empty()),
             badge_assets: BadgeAssets {
                 verified_x_description: env_or(
                     "BADGE_VERIFIED_X_DESCRIPTION",

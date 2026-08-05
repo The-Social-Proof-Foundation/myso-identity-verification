@@ -23,6 +23,12 @@ pub struct OAuthStateClaims {
     pub wallet_address: String,
     pub code_verifier: String,
     pub exp: u64,
+    #[serde(default)]
+    pub flow: String,
+    #[serde(default)]
+    pub identity_hash: Option<String>,
+    #[serde(default)]
+    pub beneficiary_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -75,6 +81,53 @@ impl XOAuthClient {
                 wallet_address: wallet_address.to_lowercase(),
                 code_verifier: code_verifier.clone(),
                 exp,
+                flow: "profile".to_string(),
+                identity_hash: None,
+                beneficiary_id: None,
+            },
+            &self.state_key,
+        )
+        .map_err(|e| ServiceError::Internal(e.into()))?;
+
+        let mut url = Url::parse(X_AUTH_URL).map_err(|e| ServiceError::Internal(e.into()))?;
+        {
+            let mut qp = url.query_pairs_mut();
+            qp.append_pair("response_type", "code");
+            qp.append_pair("client_id", &self.config.x_client_id);
+            qp.append_pair("redirect_uri", &self.config.x_callback_url);
+            qp.append_pair("scope", X_SCOPES);
+            qp.append_pair("state", &state_jwt);
+            qp.append_pair("code_challenge", &code_challenge);
+            qp.append_pair("code_challenge_method", "S256");
+        }
+
+        Ok((url.to_string(), code_verifier))
+    }
+
+    pub fn build_authorize_url_for_poc_claim(
+        &self,
+        wallet_address: &str,
+        identity_hash: &str,
+        beneficiary_id: &str,
+    ) -> Result<(String, String), ServiceError> {
+        let code_verifier = generate_code_verifier();
+        let code_challenge = code_challenge_s256(&code_verifier);
+        let exp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+            + 600;
+
+        let state_jwt = encode(
+            &Header::default(),
+            &OAuthStateClaims {
+                profile_id: String::new(),
+                wallet_address: wallet_address.to_lowercase(),
+                code_verifier: code_verifier.clone(),
+                exp,
+                flow: "poc_claim".to_string(),
+                identity_hash: Some(identity_hash.to_string()),
+                beneficiary_id: Some(beneficiary_id.to_string()),
             },
             &self.state_key,
         )

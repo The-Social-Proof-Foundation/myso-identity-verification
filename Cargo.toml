@@ -14,6 +14,7 @@ anyhow = "1"
 async-trait = "0.1"
 axum = { version = "0.7", features = ["macros"] }
 base64 = "0.22"
+blake2 = "0.10"
 chrono = { version = "0.4", features = ["serde"] }
 dotenvy = "0.15"
 hex = "0.4"
@@ -40,4 +41,5 @@ url = "2"
 urlencoding = "2"
 
 [dev-dependencies]
+ed25519-dalek = "2"
 tokio-test = "0.4"

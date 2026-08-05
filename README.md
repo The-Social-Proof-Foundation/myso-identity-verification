@@ -16,6 +16,26 @@ Ecosystem-wide identity verification service for MySocial, DripDrop, Chatr, and 
 
 Apps authenticate via `@socialproof/mysocial-auth` + `myso-salt-service`, then call this service with the session JWT.
 
+### Session JWT validation
+
+DripDrop / MySocial access tokens are **EdDSA** JWTs from salt-service:
+
+| Claim / field | Value |
+|---------------|--------|
+| `iss` | `https://salt.testnet.mysocial.network` |
+| `alg` | `EdDSA` |
+| Wallet | `wallet_address` |
+| JWKS | `https://salt.testnet.mysocial.network/.well-known/jwks.json` |
+
+Configure (or rely on built-in salt testnet defaults):
+
+```bash
+MYSOCIAL_AUTH_ISSUER=https://salt.testnet.mysocial.network
+MYSOCIAL_AUTH_JWKS_URI=https://salt.testnet.mysocial.network/.well-known/jwks.json
+```
+
+The API also accepts optional HS256 tokens when `JWT_SIGNING_KEY` matches, and RS256/EdDSA via any issuer registered in those env vars.
+
 ## Architecture
 
 ```

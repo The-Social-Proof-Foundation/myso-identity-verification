@@ -7,7 +7,8 @@ COPY src ./src
 
 RUN git clone --depth 1 https://github.com/the-social-proof-foundation/myso-core /myso-core \
     && sed -i 's|path = "../myso-core/crates/myso-sdk"|path = "/myso-core/crates/myso-sdk"|' Cargo.toml \
-    && sed -i 's|path = "../myso-core/crates/shared-crypto"|path = "/myso-core/crates/shared-crypto"|' Cargo.toml
+    && sed -i 's|path = "../myso-core/crates/shared-crypto"|path = "/myso-core/crates/shared-crypto"|' Cargo.toml \
+    && sed -i 's|path = "../myso-core/external-crates/move/crates/move-core-types"|path = "/myso-core/external-crates/move/crates/move-core-types"|' Cargo.toml
 
 RUN cargo build --release
 

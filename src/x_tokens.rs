@@ -145,6 +145,14 @@ fn derive_key(secret: &str) -> [u8; 32] {
     key
 }
 
+pub fn encrypt_token(plaintext: &str, secret: &str) -> Result<String, ServiceError> {
+    encrypt(plaintext, secret)
+}
+
+pub fn decrypt_token(encoded: &str, secret: &str) -> Result<String, ServiceError> {
+    decrypt(encoded, secret)
+}
+
 fn encrypt(plaintext: &str, secret: &str) -> Result<String, ServiceError> {
     let key = derive_key(secret);
     let cipher = Aes256Gcm::new_from_slice(&key)
