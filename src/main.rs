@@ -62,6 +62,20 @@ async fn main() -> Result<()> {
     );
     let relayer_address = relayer.address().to_string();
 
+    match relayer.chain_identifier().await {
+        Ok(chain_id) => info!(
+            myso_rpc_url = %config.myso_rpc_url,
+            indexer_graphql = %config.myso_indexer_graphql_url,
+            chain_id = %chain_id,
+            "Connected to MySo fullnode"
+        ),
+        Err(err) => tracing::warn!(
+            myso_rpc_url = %config.myso_rpc_url,
+            error = %err,
+            "Failed to read chain identifier from MYSO_RPC_URL"
+        ),
+    }
+
     let state = AppState {
         config: config.clone(),
         http: http.clone(),

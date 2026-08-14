@@ -137,6 +137,50 @@ impl ChainPtb {
     }
 
     pub fn parse_object_id(id: &str) -> Result<ObjectID> {
-        ObjectID::from_str(id).context("invalid object id")
+        let normalized = normalize_object_id(id).context("invalid object id")?;
+        ObjectID::from_str(&normalized).context("invalid object id")
+    }
+}
+
+/// Lowercase `0x` + 64 hex chars (32-byte object id), matching iOS `normalizedObjectId`.
+pub fn normalize_object_id(raw: &str) -> Result<String> {
+    let trimmed = raw.trim().to_ascii_lowercase();
+    let hex = trimmed
+        .strip_prefix("0x")
+        .ok_or_else(|| anyhow::anyhow!("object id must start with 0x"))?;
+    if hex.is_empty() || hex.len() > 64 || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        anyhow::bail!("object id must be 1..=64 hex characters after 0x");
+    }
+    if hex.len() == 64 {
+        return Ok(format!("0x{hex}"));
+    }
+    Ok(format!("0x{}{hex}", "0".repeat(64 - hex.len())))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_pads_short_ids() {
+        assert_eq!(
+            normalize_object_id("0x50c1").unwrap(),
+            "0x00000000000000000000000000000000000000000000000000000000000050c1"
+        );
+    }
+
+    #[test]
+    fn normalize_lowercases_and_accepts_full_ids() {
+        let full = "0xABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789";
+        assert_eq!(
+            normalize_object_id(full).unwrap(),
+            "0xabcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+        );
+    }
+
+    #[test]
+    fn normalize_rejects_non_hex() {
+        assert!(normalize_object_id("0xzz").is_err());
+        assert!(normalize_object_id("50c1").is_err());
     }
 }

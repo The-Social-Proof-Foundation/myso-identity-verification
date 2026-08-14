@@ -170,21 +170,49 @@ impl Relayer {
     }
 
     pub async fn fetch_profile_shared_version(&self, profile_id: &str) -> Result<u64> {
-        let oid = ChainPtb::parse_object_id(profile_id)?;
+        let normalized = crate::chain::normalize_object_id(profile_id)?;
+        let oid = ChainPtb::parse_object_id(&normalized)?;
+        let options = MySoObjectDataOptions {
+            show_owner: true,
+            show_type: true,
+            ..MySoObjectDataOptions::default()
+        };
         let resp = self
             .client
             .read_api()
-            .get_object_with_options(oid, MySoObjectDataOptions::default())
+            .get_object_with_options(oid, options)
             .await
-            .context("fetch profile object")?;
-        let data = resp.data.context("profile object missing")?;
+            .with_context(|| {
+                format!(
+                    "fetch profile object {normalized} via {}",
+                    self.config.myso_rpc_url
+                )
+            })?;
+        let data = resp.data.ok_or_else(|| {
+            anyhow::anyhow!(
+                "on-chain profile not found for {normalized} — check MYSO_RPC_URL matches the indexer network (current RPC {})",
+                self.config.myso_rpc_url
+            )
+        })?;
         match data.owner {
             Some(myso_sdk::types::object::Owner::Shared {
                 initial_shared_version,
             }) => Ok(initial_shared_version.into()),
-            Some(other) => anyhow::bail!("profile is not a shared object: {other:?}"),
-            None => anyhow::bail!("profile object missing owner"),
+            Some(other) => anyhow::bail!(
+                "profile {normalized} is not a shared object (owner={other:?})"
+            ),
+            None => anyhow::bail!(
+                "profile {normalized} missing owner field — ensure getObject requests showOwner"
+            ),
         }
+    }
+
+    pub async fn chain_identifier(&self) -> Result<String> {
+        self.client
+            .read_api()
+            .get_chain_identifier()
+            .await
+            .context("get chain identifier")
     }
 
     async fn sign_and_execute(

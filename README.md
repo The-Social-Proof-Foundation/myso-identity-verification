@@ -61,6 +61,11 @@ Add-ons: **Redis** (OAuth token store + pending campaign queue — not source of
 
 See [`.env.example`](.env.example).
 
+| Variable | Notes |
+|----------|--------|
+| `MYSO_RPC_URL` | **JSON-RPC** fullnode, e.g. `http://fullnode.testnet.mysocial.network:9000`. Do not use `:443` (gRPC/TLS). |
+| `MYSO_INDEXER_GRAPHQL_URL` | Must be the **same network** as `MYSO_RPC_URL`. A local/ngrok indexer with a testnet RPC causes `profile object missing` after X OAuth. |
+
 The MySocial on-chain package ID is hardcoded to `0x50c1` (testnet) in `src/config.rs` — no env var needed.
 
 ### X credentials
@@ -78,13 +83,16 @@ Create an OAuth 2.0 Web App (Confidential Client) in the X Developer Portal with
 
 ### X OAuth callback responses
 
-`GET /oauth/x/callback` returns JSON:
+`GET /oauth/x/callback` returns an HTML page for browsers (Safari / in-app webview). Clients that send `Accept: application/json` (and not `text/html`) still receive JSON:
 
-| Outcome | Example response |
+| Outcome | Example JSON |
 |---------|------------------|
 | Success | `{ "status": "verified", "tx_digest": "...", "x_username": "..." }` |
 | User denied on X | `{ "error": "x oauth denied: access_denied — ..." }` |
 | Callback hit without completing OAuth | `{ "error": "missing authorization code — start from POST /oauth/x/connect and approve the X app" }` |
+| On-chain profile missing / RPC misconfig | `{ "error": "on-chain profile not found for … — check MYSO_RPC_URL matches the indexer network" }` |
+
+`POST /oauth/x/connect` now verifies the profile exists on-chain before returning `authorize_url`, so RPC/indexer skew fails early instead of after X approval.
 
 Always start a fresh flow with `POST /oauth/x/connect` and open the returned `authorize_url` in a browser.
 
