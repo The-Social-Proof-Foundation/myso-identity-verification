@@ -33,6 +33,11 @@ pub struct Config {
     pub x_client_id: String,
     pub x_client_secret: String,
     pub x_callback_url: String,
+    pub facebook_app_id: Option<String>,
+    pub facebook_app_secret: Option<String>,
+    pub facebook_callback_url: Option<String>,
+    pub dripdrop_internal_url: Option<String>,
+    pub dripdrop_internal_api_key: Option<String>,
     pub share_campaign_check_delay_hours: u32,
     pub myso_rpc_url: String,
     pub myso_social_package_id: String,
@@ -84,6 +89,12 @@ impl Config {
             x_client_id: env::var("X_CLIENT_ID").context("X_CLIENT_ID not set")?,
             x_client_secret: env::var("X_CLIENT_SECRET").context("X_CLIENT_SECRET not set")?,
             x_callback_url: env::var("X_CALLBACK_URL").context("X_CALLBACK_URL not set")?,
+            facebook_app_id: optional_env("FACEBOOK_APP_ID"),
+            facebook_app_secret: optional_env("FACEBOOK_APP_SECRET"),
+            facebook_callback_url: optional_env("FACEBOOK_CALLBACK_URL"),
+            dripdrop_internal_url: optional_env("DRIPDROP_INTERNAL_URL"),
+            dripdrop_internal_api_key: optional_env("DRIPDROP_INTERNAL_API_KEY")
+                .or_else(|| optional_env("INTERNAL_API_KEY")),
             share_campaign_check_delay_hours: env::var("SHARE_CAMPAIGN_CHECK_DELAY_HOURS")
                 .unwrap_or_else(|_| "24".into())
                 .parse()
@@ -145,6 +156,15 @@ impl Config {
         })
     }
 
+    pub fn facebook_enabled(&self) -> bool {
+        self.facebook_app_id.as_deref().is_some_and(|s| !s.is_empty())
+            && self.facebook_app_secret.as_deref().is_some_and(|s| !s.is_empty())
+            && self
+                .facebook_callback_url
+                .as_deref()
+                .is_some_and(|s| !s.is_empty())
+    }
+
     pub fn is_early_access_active(&self) -> bool {
         match self.early_access_ends_at {
             Some(end) => Utc::now() < end,
@@ -155,6 +175,10 @@ impl Config {
 
 fn env_or(key: &str, default: &str) -> String {
     env::var(key).unwrap_or_else(|_| default.to_string())
+}
+
+fn optional_env(key: &str) -> Option<String> {
+    env::var(key).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
 }
 
 fn parse_csv(raw: String) -> Vec<String> {

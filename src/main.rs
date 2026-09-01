@@ -23,6 +23,9 @@ use myso_identity_verification::auth::SessionValidator;
 use myso_identity_verification::config::Config;
 use myso_identity_verification::handlers;
 use myso_identity_verification::indexer::IndexerClient;
+use myso_identity_verification::dripdrop::DripdropInternalClient;
+use myso_identity_verification::facebook_api::FacebookApiClient;
+use myso_identity_verification::oauth::facebook::FacebookOAuthClient;
 use myso_identity_verification::oauth::x::XOAuthClient;
 use myso_identity_verification::relayer::Relayer;
 use myso_identity_verification::run_scheduler;
@@ -91,7 +94,30 @@ async fn main() -> Result<()> {
             relayer_address,
         )),
         x_oauth: Arc::new(XOAuthClient::new(config.clone(), http.clone())),
-        x_api: Arc::new(XApiClient::new(http, &config)),
+        x_api: Arc::new(XApiClient::new(http.clone(), &config)),
+        facebook_oauth: if config.facebook_enabled() {
+            Some(Arc::new(FacebookOAuthClient::new(
+                config.facebook_app_id.clone().unwrap(),
+                config.facebook_app_secret.clone().unwrap(),
+                config.facebook_callback_url.clone().unwrap(),
+                config.oauth_state_secret.clone(),
+                http.clone(),
+            )))
+        } else {
+            None
+        },
+        facebook_api: if config.facebook_enabled() {
+            Some(Arc::new(FacebookApiClient::new(http.clone())))
+        } else {
+            None
+        },
+        dripdrop: config.dripdrop_internal_url.clone().map(|url| {
+            Arc::new(DripdropInternalClient::new(
+                http,
+                url,
+                config.dripdrop_internal_api_key.clone(),
+            ))
+        }),
         relayer,
     };
 
@@ -154,6 +180,10 @@ fn build_router(state: AppState, allowed_origins: &[String]) -> Router {
         .route("/health", get(handlers::health_check))
         .route("/oauth/x/connect", post(handlers::x_connect))
         .route("/oauth/x/callback", get(handlers::x_callback))
+        .route("/oauth/facebook/connect", post(handlers::facebook_connect))
+        .route("/oauth/facebook/callback", get(handlers::facebook_callback))
+        .route("/verification/facebook", get(handlers::get_facebook_verification))
+        .route("/facebook/data-deletion", post(handlers::facebook_data_deletion).get(handlers::facebook_data_deletion_status))
         .route("/oauth/x/connect-for-poc-claim", post(handlers::poc_claim_connect))
         .route("/verification/poc/status", get(handlers::poc_claim_status))
         .route("/verification/poc/attest-for-claim", post(handlers::poc_claim_attest))

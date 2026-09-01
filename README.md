@@ -5,6 +5,7 @@ Ecosystem-wide identity verification service for MySocial, DripDrop, Chatr, and 
 ## Responsibilities
 
 - X account verification and `verified_x_account` ecosystem badge
+- Facebook Login (web) for friend matching — tokens stay on the server; ASIDs are linked into dripdrop-backend
 - Unified share-badge campaigns (`early_adopter`, `ambassador`) with 24h tweet persistence
 - Social graph import (X following → MySocial profile matches)
 - On-chain writes via `EcosystemBadgeAdminCap` relayer wallet
@@ -79,6 +80,18 @@ Only OAuth app credentials are required:
 
 After OAuth, refresh tokens are stored in Redis (encrypted) and used server-side for tweet lookups, following lists, and 24h re-checks. Clients never pass X access tokens to this service.
 
+### Facebook Login (friends)
+
+See [FACEBOOK_SETUP.md](FACEBOOK_SETUP.md) for Meta app review, Test Users, and the data-deletion callback.
+
+| Variable | Purpose |
+|----------|---------|
+| `FACEBOOK_APP_ID` + `FACEBOOK_APP_SECRET` | Facebook Login (web) credentials |
+| `FACEBOOK_CALLBACK_URL` | Must match the Meta Valid OAuth Redirect URI |
+| `DRIPDROP_INTERNAL_URL` + `DRIPDROP_INTERNAL_API_KEY` | Persist `facebook_id` + friend edges after connect |
+
+Scopes: `public_profile`, `user_friends`. Graph `GET /me/friends` only returns friends who also connected this app. Tokens never reach iOS.
+
 Create an OAuth 2.0 Web App (Confidential Client) in the X Developer Portal with callback URL matching `X_CALLBACK_URL` and scopes: `tweet.read`, `users.read`, `follows.read`, `offline.access`.
 
 ### X OAuth callback responses
@@ -103,6 +116,11 @@ Always start a fresh flow with `POST /oauth/x/connect` and open the returned `au
 | GET | `/health` | Liveness |
 | POST | `/oauth/x/connect` | Start X OAuth (requires session JWT) |
 | GET | `/oauth/x/callback` | Complete X OAuth, issue verified badge + x_username |
+| POST | `/oauth/facebook/connect` | Start Facebook Login (requires session JWT) |
+| GET | `/oauth/facebook/callback` | Exchange code, store token, link friends in dripdrop-backend |
+| GET | `/verification/facebook?address=0x...` | `{ connected, facebook_id, facebook_name }` from Redis |
+| POST | `/facebook/data-deletion` | Meta data-deletion callback (`signed_request`) |
+| GET | `/facebook/data-deletion?code=` | Deletion confirmation page |
 | GET | `/verification/x?address=0x...` | Read verification status from indexer |
 | GET | `/social-graph/x/matches?address=0x...` | Match X following to MySocial profiles (requires prior X OAuth) |
 | POST | `/campaigns/share/start` | Enqueue share campaign (early_adopter / ambassador) |

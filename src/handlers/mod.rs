@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 mod campaigns;
+mod facebook;
 mod health;
 mod oauth;
 mod poc_claim;
@@ -13,6 +14,7 @@ use axum::Json;
 use axum::http::StatusCode;
 
 pub use campaigns::*;
+pub use facebook::*;
 pub use health::*;
 pub use oauth::*;
 pub use poc_claim::*;
