@@ -14,6 +14,8 @@ use crate::state::AppState;
 
 #[derive(Debug, Deserialize)]
 pub struct ConnectRequest {
+    /// Required for X (on-chain verify). Optional for Facebook (wallet-keyed).
+    #[serde(default)]
     pub profile_id: String,
 }
 
@@ -365,6 +367,15 @@ mod tests {
             error: None,
             error_description: None,
         }
+    }
+
+    #[test]
+    fn connect_request_profile_id_defaults_empty() {
+        let missing: ConnectRequest = serde_json::from_str("{}").unwrap();
+        assert_eq!(missing.profile_id, "");
+        let present: ConnectRequest =
+            serde_json::from_str(r#"{"profile_id":"0xabc"}"#).unwrap();
+        assert_eq!(present.profile_id, "0xabc");
     }
 
     #[test]

@@ -8,13 +8,11 @@ use axum::Json;
 use redis::AsyncCommands;
 use serde::Deserialize;
 
-use crate::chain::normalize_object_id;
 use crate::error::ServiceError;
 use crate::facebook_signed_request::parse_signed_request;
 use crate::facebook_tokens::FacebookTokenStore;
 use crate::handlers::oauth::{CallbackQuery, ConnectRequest, ConnectResponse};
 use crate::handlers::verification::VerificationQuery;
-use crate::indexer::assert_profile_owner;
 use crate::state::AppState;
 
 #[derive(Debug, serde::Serialize)]
@@ -171,26 +169,10 @@ pub async fn facebook_connect(
     let facebook_oauth = state.facebook_oauth.as_ref().expect("checked");
 
     let session = state.sessions.validate_headers(&headers).await?;
-    let profile = state
-        .indexer
-        .get_profile_by_address(&session.wallet_address)
-        .await?
-        .ok_or_else(|| ServiceError::not_found("profile not found"))?;
-    assert_profile_owner(&profile, &session.wallet_address)?;
-
-    let on_chain_id = profile
-        .profile_id
-        .as_deref()
-        .ok_or_else(|| ServiceError::bad_request("profile missing profile_id"))?;
-    let indexed_id = normalize_object_id(on_chain_id)
-        .map_err(|e| ServiceError::bad_request(format!("indexer profile_id invalid: {e}")))?;
-    let request_id = normalize_object_id(&body.profile_id)
-        .map_err(|e| ServiceError::bad_request(format!("profile_id invalid: {e}")))?;
-    if indexed_id != request_id {
-        return Err(ServiceError::bad_request("profile_id mismatch"));
-    }
-
-    let authorize_url = facebook_oauth.build_authorize_url(&request_id, &session.wallet_address)?;
+    // Wallet session is enough — Facebook link is off-chain (Redis + dripdrop).
+    // `profile_id` in the body is optional and only echoed into OAuth state.
+    let authorize_url =
+        facebook_oauth.build_authorize_url(&body.profile_id, &session.wallet_address)?;
     Ok(Json(ConnectResponse { authorize_url }))
 }
 

@@ -92,6 +92,8 @@ See [FACEBOOK_SETUP.md](FACEBOOK_SETUP.md) for Meta app review, Test Users, and 
 
 Scopes: `public_profile`, `user_friends`. Graph `GET /me/friends` only returns friends who also connected this app. Tokens never reach iOS.
 
+`POST /oauth/facebook/connect` authenticates the wallet from the session JWT. Unlike X, it does **not** require an indexer / on-chain profile. Body `profile_id` is optional (accepted for older clients) and is not used to authorize the link.
+
 Create an OAuth 2.0 Web App (Confidential Client) in the X Developer Portal with callback URL matching `X_CALLBACK_URL` and scopes: `tweet.read`, `users.read`, `follows.read`, `offline.access`.
 
 ### X OAuth callback responses
@@ -116,7 +118,7 @@ Always start a fresh flow with `POST /oauth/x/connect` and open the returned `au
 | GET | `/health` | Liveness |
 | POST | `/oauth/x/connect` | Start X OAuth (requires session JWT) |
 | GET | `/oauth/x/callback` | Complete X OAuth, issue verified badge + x_username |
-| POST | `/oauth/facebook/connect` | Start Facebook Login (requires session JWT) |
+| POST | `/oauth/facebook/connect` | Start Facebook Login (session JWT; on-chain profile not required; `profile_id` optional) |
 | GET | `/oauth/facebook/callback` | Exchange code, store token, link friends in dripdrop-backend |
 | GET | `/verification/facebook?address=0x...` | `{ connected, facebook_id, facebook_name }` from Redis |
 | POST | `/facebook/data-deletion` | Meta data-deletion callback (`signed_request`) |

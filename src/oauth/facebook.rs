@@ -186,6 +186,29 @@ mod tests {
     use super::*;
 
     #[test]
+    fn state_roundtrip_allows_empty_profile_id() {
+        let client = FacebookOAuthClient::new(
+            "123456".into(),
+            "app-secret".into(),
+            "https://example.com/oauth/facebook/callback".into(),
+            "state-secret".into(),
+            reqwest::Client::new(),
+        );
+        let url = client
+            .build_authorize_url("", "0xABC")
+            .expect("authorize url");
+        let parsed = Url::parse(&url).expect("url");
+        let state = parsed
+            .query_pairs()
+            .find(|(k, _)| k == "state")
+            .map(|(_, v)| v.into_owned())
+            .expect("state");
+        let claims = client.decode_state(&state).expect("decode");
+        assert_eq!(claims.profile_id, "");
+        assert_eq!(claims.wallet_address, "0xabc");
+    }
+
+    #[test]
     fn authorize_url_includes_scopes_and_state() {
         let url = build_facebook_authorize_url(
             "123456",
