@@ -102,6 +102,31 @@ pub fn build_attestation(
     Ok((evidence_hash, verified_at))
 }
 
+/// Evidence for an identity-verified proposal to redirect an unclaimed
+/// beneficiary. The recipient is included so the evidence cannot be replayed
+/// for a different wallet.
+pub fn build_transfer_attestation(
+    beneficiary_id: &str,
+    identity_hash: &str,
+    attested_x_handle: &str,
+    verified_wallet: &str,
+    recipient: &str,
+) -> Result<(String, i64), ServiceError> {
+    let verified_at = Utc::now().timestamp();
+    let mut payload = build_attestation_payload(
+        beneficiary_id,
+        identity_hash,
+        attested_x_handle,
+        verified_wallet,
+        "myso-identity-verification-beneficiary-transfer",
+        verified_at,
+    );
+    payload.insert("purpose".into(), json!("beneficiary_transfer"));
+    payload.insert("recipient".into(), json!(recipient));
+    let evidence_hash = compute_evidence_hash_v1(&payload)?;
+    Ok((evidence_hash, verified_at))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

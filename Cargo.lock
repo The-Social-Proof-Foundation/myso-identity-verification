@@ -5007,6 +5007,11 @@ version = "0.0.1"
 dependencies = [
  "anemo",
  "anyhow",
+ "ark-bn254",
+ "ark-ff",
+ "ark-groth16",
+ "ark-relations",
+ "ark-snark",
  "async-trait",
  "base64 0.21.7",
  "bcs",

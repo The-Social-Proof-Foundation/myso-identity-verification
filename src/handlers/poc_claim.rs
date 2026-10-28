@@ -7,7 +7,9 @@ use axum::Json;
 use serde::{Deserialize, Serialize};
 
 use crate::error::ServiceError;
-use crate::poc_claim::{build_attestation, validate_handle_matches_identity_hash};
+use crate::poc_claim::{
+    build_attestation, build_transfer_attestation, validate_handle_matches_identity_hash,
+};
 use crate::poc_tokens::{PocClaimTokenRecord, PocClaimTokenStore};
 use crate::state::AppState;
 
@@ -30,6 +32,15 @@ pub struct PocClaimAttestRequest {
     pub wallet: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct PocBeneficiaryTransferAttestRequest {
+    pub identity_hash: String,
+    pub beneficiary_id: String,
+    /// Wallet that completed X OAuth and is proving control of the identity.
+    pub wallet: String,
+    pub recipient: String,
+}
+
 #[derive(Debug, Serialize)]
 pub struct PocClaimAttestResponse {
     pub attested_x_handle: String,
@@ -43,6 +54,7 @@ pub struct PocClaimAttestResponse {
 pub struct PocClaimStatusQuery {
     pub identity_hash: String,
     pub wallet: String,
+    pub beneficiary_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -53,6 +65,7 @@ pub struct PocClaimStatusResponse {
     pub identity_hash: String,
     pub wallet: String,
     pub authorize_url: Option<String>,
+    pub beneficiary_id: Option<String>,
 }
 
 fn ensure_poc_claim_enabled(state: &AppState) -> Result<(), ServiceError> {
@@ -121,13 +134,15 @@ pub async fn poc_claim_status(
     let mut redis = state.redis.clone();
     let record = PocClaimTokenStore::get(&mut redis, &query.wallet, &query.identity_hash).await?;
 
+    let beneficiary_matches = record.as_ref().is_some_and(|r| query.beneficiary_id.as_ref().is_none_or(|id| id.eq_ignore_ascii_case(&r.beneficiary_id)));
     Ok(Json(PocClaimStatusResponse {
-        oauth_required: record.is_none(),
-        oauth_complete: record.is_some(),
-        attested_x_handle: record.as_ref().map(|r| r.x_username.clone()),
+        oauth_required: !beneficiary_matches,
+        oauth_complete: beneficiary_matches,
+        attested_x_handle: record.as_ref().filter(|_| beneficiary_matches).map(|r| r.x_username.clone()),
         identity_hash: query.identity_hash,
         wallet: query.wallet,
         authorize_url: None,
+        beneficiary_id: record.map(|r| r.beneficiary_id),
     }))
 }
 
@@ -163,6 +178,67 @@ pub async fn poc_claim_attest(
         &body.identity_hash,
         &handle,
         &body.wallet,
+    )?;
+
+    Ok(Json(PocClaimAttestResponse {
+        attested_x_handle: handle,
+        identity_hash: body.identity_hash,
+        evidence_hash,
+        verifier: "myso-identity-verification",
+        verified_at,
+    }))
+}
+
+pub async fn poc_beneficiary_transfer_attest(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<PocBeneficiaryTransferAttestRequest>,
+) -> Result<Json<PocClaimAttestResponse>, ServiceError> {
+    ensure_poc_claim_enabled(&state)?;
+    let _ = authorize_session_or_service(&state, &headers, &body.wallet).await?;
+    let recipient_hex = body
+        .recipient
+        .trim()
+        .strip_prefix("0x")
+        .or_else(|| body.recipient.trim().strip_prefix("0X"))
+        .ok_or_else(|| ServiceError::bad_request("recipient must be a 0x-prefixed wallet"))?;
+    if recipient_hex.is_empty() || recipient_hex.len() > 64 {
+        return Err(ServiceError::bad_request("recipient must be a 32-byte address"));
+    }
+    let padded_recipient = if recipient_hex.len() % 2 == 0 {
+        recipient_hex.to_string()
+    } else {
+        format!("0{recipient_hex}")
+    };
+    let recipient_bytes = hex::decode(padded_recipient)
+        .map_err(|_| ServiceError::bad_request("recipient must be hexadecimal"))?;
+    if recipient_bytes.iter().all(|byte| *byte == 0) {
+        return Err(ServiceError::bad_request("recipient must be nonzero"));
+    }
+    let recipient = format!("0x{:0>64}", hex::encode(recipient_bytes));
+
+    let mut redis = state.redis.clone();
+    let record = PocClaimTokenStore::get(&mut redis, &body.wallet, &body.identity_hash)
+        .await?
+        .ok_or_else(|| {
+            ServiceError::bad_request(
+                "X OAuth not completed for this identity — start the PoC OAuth connection first",
+            )
+        })?;
+    if record.beneficiary_id != body.beneficiary_id {
+        return Err(ServiceError::bad_request("beneficiary_id mismatch"));
+    }
+
+    let access_token =
+        get_valid_poc_claim_access_token(&state, &body.wallet, &body.identity_hash, &record).await?;
+    let x_user = state.x_api.get_authenticated_user(&access_token).await?;
+    let handle = validate_handle_matches_identity_hash(&x_user.username, &body.identity_hash)?;
+    let (evidence_hash, verified_at) = build_transfer_attestation(
+        &body.beneficiary_id,
+        &body.identity_hash,
+        &handle,
+        &body.wallet,
+        &recipient,
     )?;
 
     Ok(Json(PocClaimAttestResponse {
