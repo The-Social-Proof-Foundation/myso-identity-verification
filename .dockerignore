@@ -1,0 +1,8 @@
+target
+.git
+.env
+.env.*
+!.env.example
+.DS_Store
+.cursor
+*.log
