@@ -15,7 +15,6 @@ use crate::state::AppState;
 
 #[derive(Debug, Deserialize)]
 pub struct ShareStartRequest {
-    pub profile_id: String,
     pub badge: String,
     pub tweet_url: String,
 }
@@ -46,7 +45,6 @@ pub async fn share_start(
     let status = start_share_campaign(
         &state,
         &session.wallet_address,
-        &body.profile_id,
         &body.badge,
         &body.tweet_url,
     )

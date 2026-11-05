@@ -171,10 +171,10 @@ Stop the server with `Ctrl+C` (or SIGTERM in Docker/Railway). If the port is sti
 ## Ecosystem app integration
 
 1. User logs in via MySocial Auth (salt service).
-2. App calls `POST /oauth/x/connect` with `Authorization: Bearer <session_access_token>`.
+2. App calls `POST /oauth/x/connect` with `Authorization: Bearer <session_access_token>`. No profile is required.
 3. Redirect user to returned `authorize_url`.
-4. After callback, read `xUsername` and badges from **GraphQL** (not this service).
-5. For share badges: `POST /campaigns/share/start`, poll `GET /campaigns/share/status` or wait for indexer badge.
+4. On callback the relayer mints the soulbound Verified X badge into the session wallet. Read it from **GraphQL** `wallet(address){ xUsername badges { badgeId badgeObjectId } }` or poll `GET /verification/x?address=`.
+5. For share badges: `POST /campaigns/share/start` (`{ badge, tweet_url }`), poll `GET /campaigns/share/status` or wait for the indexer badge.
 6. For follow recommendations: `GET /social-graph/x/matches?address=0x...` with session JWT.
 
 Configure frontend env:
@@ -191,4 +191,11 @@ NEXT_PUBLIC_IDENTITY_VERIFICATION_API_URL=https://identity-verification.testnet.
 | Early Adopter | `early_adopter` |
 | Ambassador | `ambassador` |
 
-Badge IDs: `ecosystem_badge_{relayer_address}_{badge_name}`
+Badge IDs: `ecosystem_badge_{badge_name}`
+
+Ecosystem badges are soulbound `platform::EcosystemBadge` objects minted by the
+`EcosystemBadgeAdminCap` holder (this service's relayer) directly into the user's wallet.
+They are permanent — there is no revoke; only the holder can burn one
+(`platform::burn_ecosystem_badge`). The shared `EcosystemBadgeRegistry`
+(`ECOSYSTEM_BADGE_REGISTRY_ID`) prevents duplicates and binds each verified X handle to one
+wallet: a second wallet verifying the same handle gets `409`.

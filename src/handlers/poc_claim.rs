@@ -283,11 +283,38 @@ pub async fn complete_poc_claim_oauth(
     )
     .await?;
 
+    // The PoC OAuth proves X ownership, so also give the creator's wallet its soulbound
+    // Verified X badge. Best-effort: never fail the PoC claim over the badge.
+    let verified_x_badge =
+        mint_verified_x_best_effort(state, &oauth_state.wallet_address, x_username).await;
+
     Ok(Json(serde_json::json!({
         "status": "oauth_complete",
         "x_username": x_username,
         "identity_hash": identity_hash,
+        "verified_x_badge": verified_x_badge,
     })))
+}
+
+async fn mint_verified_x_best_effort(
+    state: &AppState,
+    wallet: &str,
+    x_username: &str,
+) -> serde_json::Value {
+    use crate::relayer::{BadgeMintError, VERIFIED_X_BADGE};
+    match state.indexer.has_ecosystem_badge(wallet, VERIFIED_X_BADGE).await {
+        Ok(true) => return serde_json::json!({ "status": "already_verified" }),
+        Ok(false) => {}
+        Err(e) => tracing::warn!(error = %e, "verified x badge pre-check failed; minting anyway"),
+    }
+    match state.relayer.mint_verified_x(wallet, x_username).await {
+        Ok(resp) => serde_json::json!({ "status": "minted", "tx_digest": resp.digest.to_string() }),
+        Err(BadgeMintError::AlreadyIssued) => serde_json::json!({ "status": "already_verified" }),
+        Err(e) => {
+            tracing::warn!(error = %e, wallet, x_username, "verified x badge mint skipped");
+            serde_json::json!({ "status": "skipped", "reason": e.to_string() })
+        }
+    }
 }
 
 async fn get_valid_poc_claim_access_token(

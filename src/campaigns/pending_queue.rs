@@ -16,9 +16,8 @@ pub const JOB_LOCK_PREFIX: &str = "pending_share_campaign:lock:";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PendingShareCampaign {
-    pub profile_id: String,
+    /// Wallet that receives the soulbound badge (jobs are keyed by wallet + badge).
     pub wallet_address: String,
-    pub profile_shared_version: u64,
     pub badge_name: String,
     pub tweet_url: String,
     pub tweet_id: String,
@@ -30,12 +29,12 @@ pub struct PendingShareCampaign {
 
 impl PendingShareCampaign {
     pub fn redis_key(&self) -> String {
-        job_key(&self.profile_id, &self.badge_name)
+        job_key(&self.wallet_address, &self.badge_name)
     }
 }
 
-pub fn job_key(profile_id: &str, badge_name: &str) -> String {
-    format!("{PENDING_JOB_PREFIX}{profile_id}:{badge_name}")
+pub fn job_key(wallet_address: &str, badge_name: &str) -> String {
+    format!("{PENDING_JOB_PREFIX}{}:{badge_name}", wallet_address.to_lowercase())
 }
 
 pub fn job_lock_key(job_key: &str) -> String {
@@ -67,10 +66,10 @@ impl PendingQueue {
 
     pub async fn get(
         redis: &mut ConnectionManager,
-        profile_id: &str,
+        wallet_address: &str,
         badge_name: &str,
     ) -> Result<Option<PendingShareCampaign>, ServiceError> {
-        let key = job_key(profile_id, badge_name);
+        let key = job_key(wallet_address, badge_name);
         let raw: Option<String> = redis
             .get(&key)
             .await
@@ -83,10 +82,10 @@ impl PendingQueue {
 
     pub async fn delete(
         redis: &mut ConnectionManager,
-        profile_id: &str,
+        wallet_address: &str,
         badge_name: &str,
     ) -> Result<(), ServiceError> {
-        let key = job_key(profile_id, badge_name);
+        let key = job_key(wallet_address, badge_name);
         redis
             .del::<_, ()>(&key)
             .await

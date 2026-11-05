@@ -25,16 +25,11 @@ pub struct IndexerBadge {
 pub struct IndexerClient {
     graphql_url: String,
     http: Client,
-    relayer_address: String,
 }
 
 impl IndexerClient {
-    pub fn new(graphql_url: String, http: Client, relayer_address: String) -> Self {
-        Self {
-            graphql_url,
-            http,
-            relayer_address: relayer_address.to_lowercase(),
-        }
+    pub fn new(graphql_url: String, http: Client) -> Self {
+        Self { graphql_url, http }
     }
 
     pub async fn get_profile_by_address(
@@ -75,14 +70,16 @@ impl IndexerClient {
             .map(profile_node_to_indexer))
     }
 
-    pub async fn get_profile_badges(
+    /// Badges held by a wallet (soulbound ecosystem badges + platform grants). Works for
+    /// wallets without a profile.
+    pub async fn get_wallet_badges(
         &self,
         address: &str,
     ) -> Result<Vec<IndexerBadge>, ServiceError> {
         let query = r#"
-            query ProfileBadges($address: MySoAddress!) {
-                profile(address: $address) {
-                    badges {
+            query WalletBadges($address: MySoAddress!) {
+                wallet(address: $address) {
+                    badges(limit: 100) {
                         badgeId
                         badgeName
                     }
@@ -98,12 +95,12 @@ impl IndexerClient {
             badge_name: String,
         }
         #[derive(Deserialize)]
-        struct ProfileNode {
+        struct WalletNode {
             badges: Option<Vec<BadgeNode>>,
         }
         #[derive(Deserialize)]
         struct Data {
-            profile: Option<ProfileNode>,
+            wallet: Option<WalletNode>,
         }
         #[derive(Deserialize)]
         struct Resp {
@@ -119,8 +116,8 @@ impl IndexerClient {
 
         Ok(resp
             .data
-            .and_then(|d| d.profile)
-            .and_then(|p| p.badges)
+            .and_then(|d| d.wallet)
+            .and_then(|w| w.badges)
             .unwrap_or_default()
             .into_iter()
             .map(|b| IndexerBadge {
@@ -139,19 +136,33 @@ impl IndexerClient {
         }
 
         let normalized: Vec<String> = usernames.iter().map(|u| u.to_lowercase()).collect();
+        self.profiles_by_x_usernames_direct(&normalized).await
+    }
 
-        match self
-            .profiles_by_x_usernames_direct(&normalized)
-            .await
-        {
-            Ok(profiles) => Ok(profiles),
-            Err(ServiceError::Upstream(msg))
-                if msg.contains("profilesByXUsernames") && msg.contains("Unknown field") =>
-            {
-                self.profiles_by_x_usernames_scan(&normalized).await
+    /// Verified X handle bound to `wallet` (from its soulbound Verified X badge).
+    pub async fn wallet_x_username(&self, wallet: &str) -> Result<Option<String>, ServiceError> {
+        let query = r#"
+            query WalletXUsername($address: MySoAddress!) {
+                wallet(address: $address) { xUsername }
             }
-            Err(e) => Err(e),
+        "#;
+        #[derive(Deserialize)]
+        struct WalletNode {
+            #[serde(rename = "xUsername")]
+            x_username: Option<String>,
         }
+        #[derive(Deserialize)]
+        struct Data {
+            wallet: Option<WalletNode>,
+        }
+        #[derive(Deserialize)]
+        struct Resp {
+            data: Option<Data>,
+        }
+        let resp: Resp = self
+            .graphql_query(query, serde_json::json!({ "address": wallet }))
+            .await?;
+        Ok(resp.data.and_then(|d| d.wallet).and_then(|w| w.x_username))
     }
 
     async fn profiles_by_x_usernames_direct(
@@ -196,96 +207,9 @@ impl IndexerClient {
             .collect())
     }
 
-    async fn profiles_by_x_usernames_scan(
-        &self,
-        usernames: &[String],
-    ) -> Result<Vec<IndexerProfile>, ServiceError> {
-        use std::collections::HashSet;
-
-        let wanted: HashSet<String> = usernames.iter().cloned().collect();
-        let mut matched = Vec::new();
-        let mut matched_usernames = HashSet::new();
-        let mut offset = 0;
-        const PAGE: i32 = 100;
-
-        loop {
-            let page = self.fetch_profiles_page(PAGE, offset).await?;
-            let page_len = page.len();
-            if page.is_empty() {
-                break;
-            }
-
-            for profile in page {
-                if profile
-                    .x_username
-                    .as_ref()
-                    .map(|x| wanted.contains(&x.to_lowercase()))
-                    .unwrap_or(false)
-                {
-                    let key = profile.x_username.as_ref().unwrap().to_lowercase();
-                    if matched_usernames.insert(key) {
-                        matched.push(profile);
-                    }
-                }
-            }
-
-            if matched_usernames.len() >= wanted.len() {
-                break;
-            }
-
-            if page_len < PAGE as usize {
-                break;
-            }
-            offset += PAGE;
-        }
-
-        Ok(matched)
-    }
-
-    async fn fetch_profiles_page(
-        &self,
-        limit: i32,
-        offset: i32,
-    ) -> Result<Vec<IndexerProfile>, ServiceError> {
-        let query = r#"
-            query ProfilesPage($limit: Int!, $offset: Int!) {
-                profiles(limit: $limit, offset: $offset) {
-                    address
-                    profileId
-                    username
-                    displayName
-                    xUsername
-                }
-            }
-        "#;
-
-        #[derive(Deserialize)]
-        struct Data {
-            profiles: Option<Vec<ProfileGraphNode>>,
-        }
-        #[derive(Deserialize)]
-        struct Resp {
-            data: Option<Data>,
-        }
-
-        let resp: Resp = self
-            .graphql_query(
-                query,
-                serde_json::json!({ "limit": limit, "offset": offset }),
-            )
-            .await?;
-
-        Ok(resp
-            .data
-            .and_then(|d| d.profiles)
-            .unwrap_or_default()
-            .into_iter()
-            .map(profile_node_to_indexer)
-            .collect())
-    }
-
-    pub fn ecosystem_badge_id(&self, badge_name: &str) -> String {
-        format!("ecosystem_badge_{}_{}", self.relayer_address, badge_name)
+    /// On-chain id of a soulbound ecosystem badge (`platform::ecosystem_badge_id_for_name`).
+    pub fn ecosystem_badge_id(badge_name: &str) -> String {
+        format!("ecosystem_badge_{badge_name}")
     }
 
     pub async fn has_ecosystem_badge(
@@ -293,8 +217,8 @@ impl IndexerClient {
         wallet_address: &str,
         badge_name: &str,
     ) -> Result<bool, ServiceError> {
-        let badge_id = self.ecosystem_badge_id(badge_name);
-        let badges = self.get_profile_badges(wallet_address).await?;
+        let badge_id = Self::ecosystem_badge_id(badge_name);
+        let badges = self.get_wallet_badges(wallet_address).await?;
         Ok(badges.iter().any(|b| b.badge_id == badge_id))
     }
 
