@@ -19,7 +19,7 @@ const X_SCOPES: &str = "tweet.read users.read follows.read offline.access";
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OAuthStateClaims {
-    pub profile_id: String,
+    /// Wallet that receives the soulbound Verified X badge (no profile required).
     pub wallet_address: String,
     pub code_verifier: String,
     pub exp: u64,
@@ -63,7 +63,6 @@ impl XOAuthClient {
 
     pub fn build_authorize_url(
         &self,
-        profile_id: &str,
         wallet_address: &str,
     ) -> Result<(String, String), ServiceError> {
         let code_verifier = generate_code_verifier();
@@ -77,7 +76,6 @@ impl XOAuthClient {
         let state_jwt = encode(
             &Header::default(),
             &OAuthStateClaims {
-                profile_id: profile_id.to_string(),
                 wallet_address: wallet_address.to_lowercase(),
                 code_verifier: code_verifier.clone(),
                 exp,
@@ -121,7 +119,6 @@ impl XOAuthClient {
         let state_jwt = encode(
             &Header::default(),
             &OAuthStateClaims {
-                profile_id: String::new(),
                 wallet_address: wallet_address.to_lowercase(),
                 code_verifier: code_verifier.clone(),
                 exp,

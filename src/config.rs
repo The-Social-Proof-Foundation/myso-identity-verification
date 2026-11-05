@@ -42,6 +42,8 @@ pub struct Config {
     pub myso_rpc_url: String,
     pub myso_social_package_id: String,
     pub ecosystem_badge_admin_cap_id: String,
+    /// Shared `platform::EcosystemBadgeRegistry` (soulbound badge dedupe + X handle binding).
+    pub ecosystem_badge_registry_id: String,
     pub relayer_private_key_hex: String,
     pub myso_indexer_graphql_url: String,
     pub early_access_ends_at: Option<DateTime<Utc>>,
@@ -103,6 +105,8 @@ impl Config {
             myso_social_package_id: MYSO_SOCIAL_PACKAGE_ID.to_string(),
             ecosystem_badge_admin_cap_id: env::var("ECOSYSTEM_BADGE_ADMIN_CAP_ID")
                 .context("ECOSYSTEM_BADGE_ADMIN_CAP_ID not set")?,
+            ecosystem_badge_registry_id: env::var("ECOSYSTEM_BADGE_REGISTRY_ID")
+                .context("ECOSYSTEM_BADGE_REGISTRY_ID not set")?,
             relayer_private_key_hex: env::var("RELAYER_PRIVATE_KEY")
                 .context("RELAYER_PRIVATE_KEY not set")?,
             myso_indexer_graphql_url: env::var("MYSO_INDEXER_GRAPHQL_URL")

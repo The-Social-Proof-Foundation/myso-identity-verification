@@ -63,7 +63,6 @@ async fn main() -> Result<()> {
             .await
             .context("initialize relayer")?,
     );
-    let relayer_address = relayer.address().to_string();
 
     match relayer.chain_identifier().await {
         Ok(chain_id) => info!(
@@ -91,7 +90,6 @@ async fn main() -> Result<()> {
         indexer: Arc::new(IndexerClient::new(
             config.myso_indexer_graphql_url.clone(),
             http.clone(),
-            relayer_address,
         )),
         x_oauth: Arc::new(XOAuthClient::new(config.clone(), http.clone())),
         x_api: Arc::new(XApiClient::new(http.clone(), &config)),

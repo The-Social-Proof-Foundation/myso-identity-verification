@@ -32,7 +32,6 @@ pub fn validate_badge_name(badge: &str, early_access_active: bool) -> Result<(),
 pub async fn start_share_campaign(
     state: &AppState,
     wallet_address: &str,
-    profile_id: &str,
     badge_name: &str,
     tweet_url: &str,
 ) -> Result<ShareCampaignStatus, ServiceError> {
@@ -46,16 +45,9 @@ pub async fn start_share_campaign(
         .get_profile_by_address(wallet_address)
         .await?
         .ok_or_else(|| ServiceError::not_found("profile not found"))?;
+    // The profile is only needed for the username the tweet must link to; the badge
+    // itself is minted into the wallet.
     crate::indexer::assert_profile_owner(&profile, wallet_address)?;
-
-    let on_chain_profile_id = profile
-        .profile_id
-        .clone()
-        .ok_or_else(|| ServiceError::bad_request("profile missing profile_id"))?;
-
-    if on_chain_profile_id != profile_id {
-        return Err(ServiceError::bad_request("profile_id mismatch"));
-    }
 
     if state
         .indexer
@@ -88,9 +80,7 @@ pub async fn start_share_campaign(
         + Duration::hours(state.config.share_campaign_check_delay_hours as i64);
 
     let job = PendingShareCampaign {
-        profile_id: on_chain_profile_id.clone(),
-        wallet_address: wallet_address.to_string(),
-        profile_shared_version: 0,
+        wallet_address: wallet_address.to_lowercase(),
         badge_name: badge_name.to_string(),
         tweet_url: tweet_url.to_string(),
         tweet_id: parse_tweet_id(tweet_url)?,
@@ -122,18 +112,8 @@ pub async fn get_share_status(
         return Ok(ShareCampaignStatus::completed(None));
     }
 
-    let profile = state
-        .indexer
-        .get_profile_by_address(wallet_address)
-        .await?
-        .ok_or_else(|| ServiceError::not_found("profile not found"))?;
-
-    let profile_id = profile
-        .profile_id
-        .ok_or_else(|| ServiceError::bad_request("profile missing profile_id"))?;
-
     let mut redis = state.redis.clone();
-    if let Some(job) = PendingQueue::get(&mut redis, &profile_id, badge_name).await? {
+    if let Some(job) = PendingQueue::get(&mut redis, wallet_address, badge_name).await? {
         if Utc::now() >= job.check_after {
             return process_single_job(state, &job).await;
         }
@@ -193,7 +173,7 @@ pub async fn process_pending_campaigns(state: &AppState) -> Result<ProcessSummar
                 }
             }
             Err(e) => {
-                warn!(error = %e, profile_id = %job.profile_id, "campaign job failed");
+                warn!(error = %e, wallet = %job.wallet_address, "campaign job failed");
                 summary.errors += 1;
             }
         }
@@ -251,7 +231,7 @@ async fn process_single_job_inner(
         .await?
     {
         let mut redis = state.redis.clone();
-        PendingQueue::delete(&mut redis, &job.profile_id, &job.badge_name).await?;
+        PendingQueue::delete(&mut redis, &job.wallet_address, &job.badge_name).await?;
         return Ok(ShareCampaignStatus::completed(None));
     }
 
@@ -278,7 +258,7 @@ async fn process_single_job_inner(
         Ok(t) => t,
         Err(ServiceError::NotFound(_)) => {
             let mut redis = state.redis.clone();
-            PendingQueue::delete(&mut redis, &job.profile_id, &job.badge_name).await?;
+            PendingQueue::delete(&mut redis, &job.wallet_address, &job.badge_name).await?;
             return Ok(ShareCampaignStatus::Failed {
                 reason: "tweet deleted".into(),
             });
@@ -296,34 +276,26 @@ async fn process_single_job_inner(
 
     if !tweet_contains_profile_link(&tweet.text, &profile_url, &username) {
         let mut redis = state.redis.clone();
-        PendingQueue::delete(&mut redis, &job.profile_id, &job.badge_name).await?;
+        PendingQueue::delete(&mut redis, &job.wallet_address, &job.badge_name).await?;
         return Ok(ShareCampaignStatus::Failed {
             reason: "tweet no longer contains profile link".into(),
         });
     }
 
-    let shared_version = state
+    let tx_digest = match state
         .relayer
-        .fetch_profile_shared_version(&job.profile_id)
+        .mint_share_badge(&job.wallet_address, &job.badge_name, &state.config.badge_assets)
         .await
-        .map_err(|e| ServiceError::Internal(e.into()))?;
-
-    let resp = state
-        .relayer
-        .assign_share_badge(
-            &job.profile_id,
-            shared_version,
-            &job.badge_name,
-            &state.config.badge_assets,
-        )
-        .await
-        .map_err(|e| ServiceError::Internal(e.into()))?;
-
-    let tx_digest = resp.digest.to_string();
+    {
+        Ok(resp) => Some(resp.digest.to_string()),
+        // Already minted (e.g. a concurrent run): the badge exists, so the job is done.
+        Err(crate::relayer::BadgeMintError::AlreadyIssued) => None,
+        Err(e) => return Err(ServiceError::Internal(anyhow::anyhow!(e))),
+    };
     let mut redis = state.redis.clone();
-    PendingQueue::delete(&mut redis, &job.profile_id, &job.badge_name).await?;
+    PendingQueue::delete(&mut redis, &job.wallet_address, &job.badge_name).await?;
 
-    Ok(ShareCampaignStatus::completed(Some(tx_digest)))
+    Ok(ShareCampaignStatus::completed(tx_digest))
 }
 
 fn verify_tweet_author(tweet: &crate::x_api::XTweet, x_user_id: &str) -> Result<(), ServiceError> {

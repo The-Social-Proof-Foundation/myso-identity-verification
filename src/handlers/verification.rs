@@ -30,19 +30,20 @@ pub async fn get_x_verification(
     State(state): State<AppState>,
     Query(query): Query<VerificationQuery>,
 ) -> Result<Json<VerificationResponse>, ServiceError> {
-    let profile = state
-        .indexer
-        .get_profile_by_address(&query.address)
-        .await?;
-
-    let badges = state.indexer.get_profile_badges(&query.address).await?;
-    let verified = state
-        .indexer
-        .has_ecosystem_badge(&query.address, "verified_x_account")
-        .await?;
+    // Wallet-keyed: the soulbound Verified X badge lives in the wallet, profile or not.
+    let badges = state.indexer.get_wallet_badges(&query.address).await?;
+    let verified_id = crate::indexer::IndexerClient::ecosystem_badge_id(
+        crate::relayer::VERIFIED_X_BADGE,
+    );
+    let verified = badges.iter().any(|b| b.badge_id == verified_id);
+    let x_username = if verified {
+        state.indexer.wallet_x_username(&query.address).await?
+    } else {
+        None
+    };
 
     Ok(Json(VerificationResponse {
-        x_username: profile.and_then(|p| p.x_username),
+        x_username,
         verified_x_account: verified,
         badges: badges
             .into_iter()

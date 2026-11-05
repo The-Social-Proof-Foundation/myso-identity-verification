@@ -6,13 +6,65 @@ use std::str::FromStr;
 use anyhow::{Context, Result};
 use move_core_types::identifier::Identifier;
 use myso_sdk::types::object::Owner;
-use myso_sdk::types::base_types::{ObjectID, ObjectRef};
+use myso_sdk::types::base_types::{MySoAddress, ObjectID, ObjectRef};
+use myso_sdk::types::programmable_transaction_builder::ProgrammableTransactionBuilder as Ptb;
 use myso_sdk::types::programmable_transaction_builder::ProgrammableTransactionBuilder;
 use myso_sdk::types::transaction::{Command, ObjectArg, ProgrammableTransaction};
 use myso_sdk::types::transaction::SharedObjectMutability;
 use myso_sdk::MySoClient;
 
 pub struct ChainPtb;
+
+/// Shared object id + initial shared version.
+#[derive(Debug, Clone, Copy)]
+pub struct SharedObjectRef {
+    pub id: ObjectID,
+    pub initial_shared_version: u64,
+}
+
+impl SharedObjectRef {
+    fn mutable_arg(&self) -> ObjectArg {
+        ObjectArg::SharedObject {
+            id: self.id,
+            initial_shared_version: self.initial_shared_version.into(),
+            mutability: SharedObjectMutability::Mutable,
+        }
+    }
+}
+
+/// `0x6` clock, read-only.
+fn clock_arg() -> ObjectArg {
+    ObjectArg::SharedObject {
+        id: ObjectID::from_single_byte(6),
+        initial_shared_version: 1u64.into(),
+        mutability: SharedObjectMutability::Immutable,
+    }
+}
+
+/// Display fields of an ecosystem badge, in `platform::mint_*` argument order.
+#[derive(Debug, Clone)]
+pub struct BadgeFields {
+    pub name: String,
+    pub description: String,
+    pub media_url: String,
+    pub icon_url: String,
+    pub badge_type: u8,
+}
+
+impl BadgeFields {
+    fn push_args(
+        self,
+        ptb: &mut Ptb,
+    ) -> Result<Vec<myso_sdk::types::transaction::Argument>> {
+        Ok(vec![
+            ptb.pure(self.name)?,
+            ptb.pure(self.description)?,
+            ptb.pure(self.media_url)?,
+            ptb.pure(self.icon_url)?,
+            ptb.pure(self.badge_type)?,
+        ])
+    }
+}
 
 impl ChainPtb {
     pub async fn fetch_owned_cap(
@@ -38,102 +90,86 @@ impl ChainPtb {
         Ok(data.object_ref())
     }
 
-    pub fn build_set_x_username_and_badge(
+    /// `platform::mint_verified_x_badge` — soulbound Verified X badge minted into `recipient`.
+    /// No profile object is involved, so the relayer never needs a user-owned object.
+    #[allow(clippy::too_many_arguments)]
+    pub fn build_mint_verified_x_badge(
         package_id: ObjectID,
         cap_ref: ObjectRef,
-        profile_id: ObjectID,
-        profile_shared_version: u64,
-        x_username: String,
-        badge_name: String,
-        badge_description: String,
-        badge_media_url: String,
-        badge_icon_url: String,
-        badge_type: u8,
+        registry: SharedObjectRef,
+        recipient: MySoAddress,
+        x_handle: String,
+        badge: BadgeFields,
     ) -> Result<ProgrammableTransaction> {
         let mut ptb = ProgrammableTransactionBuilder::new();
         let cap = ptb.obj(ObjectArg::ImmOrOwnedObject(cap_ref))?;
-        let profile = ptb.obj(ObjectArg::SharedObject {
-            id: profile_id,
-            initial_shared_version: profile_shared_version.into(),
-            mutability: SharedObjectMutability::Mutable,
-        })?;
-
-        let username_arg = ptb.pure(Some(x_username))?;
+        let registry = ptb.obj(registry.mutable_arg())?;
+        let recipient = ptb.pure(recipient)?;
+        let handle = ptb.pure(x_handle)?;
+        let mut args = vec![cap, registry, recipient, handle];
+        args.extend(badge.push_args(&mut ptb)?);
+        args.push(ptb.obj(clock_arg())?);
         ptb.command(Command::move_call(
             package_id,
-            Identifier::new("profile")?,
-            Identifier::new("admin_set_profile_x_username")?,
+            Identifier::new("platform")?,
+            Identifier::new("mint_verified_x_badge")?,
             vec![],
-            vec![cap, profile, username_arg],
+            args,
         ));
-
-        let badge_name = ptb.pure(badge_name)?;
-        let badge_description = ptb.pure(badge_description)?;
-        let badge_media_url = ptb.pure(badge_media_url)?;
-        let badge_icon_url = ptb.pure(badge_icon_url)?;
-        let badge_type = ptb.pure(badge_type)?;
-
-        ptb.command(Command::move_call(
-            package_id,
-            Identifier::new("profile")?,
-            Identifier::new("assign_ecosystem_badge")?,
-            vec![],
-            vec![
-                cap,
-                profile,
-                badge_name,
-                badge_description,
-                badge_media_url,
-                badge_icon_url,
-                badge_type,
-            ],
-        ));
-
         Ok(ptb.finish())
     }
 
-    pub fn build_assign_badge(
+    /// `platform::mint_ecosystem_badge` — soulbound badge (Early Adopter, Ambassador, ...).
+    pub fn build_mint_ecosystem_badge(
         package_id: ObjectID,
         cap_ref: ObjectRef,
-        profile_id: ObjectID,
-        profile_shared_version: u64,
-        badge_name: String,
-        badge_description: String,
-        badge_media_url: String,
-        badge_icon_url: String,
-        badge_type: u8,
+        registry: SharedObjectRef,
+        recipient: MySoAddress,
+        badge: BadgeFields,
     ) -> Result<ProgrammableTransaction> {
         let mut ptb = ProgrammableTransactionBuilder::new();
         let cap = ptb.obj(ObjectArg::ImmOrOwnedObject(cap_ref))?;
-        let profile = ptb.obj(ObjectArg::SharedObject {
-            id: profile_id,
-            initial_shared_version: profile_shared_version.into(),
-            mutability: SharedObjectMutability::Mutable,
-        })?;
-
-        let badge_name = ptb.pure(badge_name)?;
-        let badge_description = ptb.pure(badge_description)?;
-        let badge_media_url = ptb.pure(badge_media_url)?;
-        let badge_icon_url = ptb.pure(badge_icon_url)?;
-        let badge_type = ptb.pure(badge_type)?;
-
+        let registry = ptb.obj(registry.mutable_arg())?;
+        let recipient = ptb.pure(recipient)?;
+        let mut args = vec![cap, registry, recipient];
+        args.extend(badge.push_args(&mut ptb)?);
+        args.push(ptb.obj(clock_arg())?);
         ptb.command(Command::move_call(
             package_id,
-            Identifier::new("profile")?,
-            Identifier::new("assign_ecosystem_badge")?,
+            Identifier::new("platform")?,
+            Identifier::new("mint_ecosystem_badge")?,
             vec![],
-            vec![
-                cap,
-                profile,
-                badge_name,
-                badge_description,
-                badge_media_url,
-                badge_icon_url,
-                badge_type,
-            ],
+            args,
         ));
-
         Ok(ptb.finish())
+    }
+
+    /// Initial shared version of a shared object (e.g. the `EcosystemBadgeRegistry`).
+    pub async fn fetch_shared_object_ref(
+        client: &MySoClient,
+        id: ObjectID,
+    ) -> Result<SharedObjectRef> {
+        let resp = client
+            .read_api()
+            .get_object_with_options(
+                id,
+                myso_sdk::rpc_types::MySoObjectDataOptions {
+                    show_owner: true,
+                    ..Default::default()
+                },
+            )
+            .await
+            .with_context(|| format!("fetch shared object {id}"))?;
+        let data = resp.data.with_context(|| format!("shared object {id} not found"))?;
+        match data.owner {
+            Some(Owner::Shared {
+                initial_shared_version,
+            }) => Ok(SharedObjectRef {
+                id,
+                initial_shared_version: initial_shared_version.into(),
+            }),
+            other => anyhow::bail!("object {id} is not shared (owner={other:?})"),
+        }
     }
 
     pub fn parse_object_id(id: &str) -> Result<ObjectID> {

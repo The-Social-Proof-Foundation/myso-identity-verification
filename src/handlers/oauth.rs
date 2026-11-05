@@ -7,14 +7,14 @@ use axum::response::{Html, IntoResponse, Response};
 use axum::Json;
 use serde::Deserialize;
 
-use crate::chain::normalize_object_id;
 use crate::error::ServiceError;
-use crate::indexer::assert_profile_owner;
+use crate::relayer::{BadgeMintError, VERIFIED_X_BADGE};
 use crate::state::AppState;
 
 #[derive(Debug, Deserialize)]
 pub struct ConnectRequest {
-    /// Required for X (on-chain verify). Optional for Facebook (wallet-keyed).
+    /// Ignored: X and Facebook linking are wallet-keyed (the Verified X badge is minted into the
+    /// session wallet). Kept so older clients that still send it don't fail to decode.
     #[serde(default)]
     pub profile_id: String,
 }
@@ -85,17 +85,18 @@ fn wants_json(headers: &HeaderMap) -> bool {
     accepts_json && !accepts_html
 }
 
-fn map_profile_fetch_error(err: anyhow::Error) -> ServiceError {
-    let msg = err.to_string();
-    if msg.contains("on-chain profile not found")
-        || msg.contains("profile object missing")
-        || msg.contains("is not a shared object")
-        || msg.contains("missing owner field")
-        || msg.contains("invalid object id")
-    {
-        ServiceError::Upstream(msg)
-    } else {
-        ServiceError::Internal(err)
+fn map_badge_mint_error(err: BadgeMintError, x_username: &str) -> ServiceError {
+    match err {
+        BadgeMintError::AlreadyIssued => {
+            ServiceError::conflict("this wallet already has the Verified X badge")
+        }
+        BadgeMintError::XHandleTaken => ServiceError::conflict(format!(
+            "X account @{x_username} is already verified by another wallet"
+        )),
+        BadgeMintError::WalletHasXHandle => ServiceError::conflict(
+            "this wallet already verified a different X account — remove that badge first",
+        ),
+        BadgeMintError::Other(e) => ServiceError::Internal(e),
     }
 }
 
@@ -216,36 +217,12 @@ pub async fn x_connect(
     headers: HeaderMap,
     Json(body): Json<ConnectRequest>,
 ) -> Result<Json<ConnectResponse>, ServiceError> {
+    let _ = body;
     let session = state.sessions.validate_headers(&headers).await?;
-    let profile = state
-        .indexer
-        .get_profile_by_address(&session.wallet_address)
-        .await?
-        .ok_or_else(|| ServiceError::not_found("profile not found"))?;
-    assert_profile_owner(&profile, &session.wallet_address)?;
-
-    let on_chain_id = profile
-        .profile_id
-        .as_deref()
-        .ok_or_else(|| ServiceError::bad_request("profile missing profile_id"))?;
-    let indexed_id = normalize_object_id(on_chain_id)
-        .map_err(|e| ServiceError::bad_request(format!("indexer profile_id invalid: {e}")))?;
-    let request_id = normalize_object_id(&body.profile_id)
-        .map_err(|e| ServiceError::bad_request(format!("profile_id invalid: {e}")))?;
-    if indexed_id != request_id {
-        return Err(ServiceError::bad_request("profile_id mismatch"));
-    }
-
-    // Fail before sending the user to X if RPC cannot see this shared profile.
-    state
-        .relayer
-        .fetch_profile_shared_version(&request_id)
-        .await
-        .map_err(map_profile_fetch_error)?;
-
+    // The badge is minted into the session wallet; a profile is not required.
     let (authorize_url, _verifier) = state
         .x_oauth
-        .build_authorize_url(&request_id, &session.wallet_address)?;
+        .build_authorize_url(&session.wallet_address)?;
 
     Ok(Json(ConnectResponse { authorize_url }))
 }
@@ -323,31 +300,46 @@ async fn x_callback_inner(
     )
     .await?;
 
+    // Re-linking the same handle to the same wallet is a no-op success.
+    if state
+        .indexer
+        .has_ecosystem_badge(&oauth_state.wallet_address, VERIFIED_X_BADGE)
+        .await?
+    {
+        let current = state
+            .indexer
+            .wallet_x_username(&oauth_state.wallet_address)
+            .await?;
+        if current
+            .as_deref()
+            .is_some_and(|h| h.eq_ignore_ascii_case(&x_user.username))
+        {
+            return Ok(serde_json::json!({
+                "status": "verified",
+                "tx_digest": serde_json::Value::Null,
+                "x_username": x_user.username,
+            }));
+        }
+    }
+
+    // The chain is the source of truth for handle uniqueness (`EXHandleTaken`); this check
+    // only gives an early, friendly error.
     if state
         .indexer
         .x_username_taken(&x_user.username, Some(&oauth_state.wallet_address))
         .await?
     {
         return Err(ServiceError::conflict(format!(
-            "X account @{} already linked to another profile",
+            "X account @{} is already verified by another wallet",
             x_user.username
         )));
     }
 
-    let profile_id = normalize_object_id(&oauth_state.profile_id)
-        .map_err(|e| ServiceError::bad_request(format!("oauth state profile_id invalid: {e}")))?;
-
-    let shared_version = state
-        .relayer
-        .fetch_profile_shared_version(&profile_id)
-        .await
-        .map_err(map_profile_fetch_error)?;
-
     let resp = state
         .relayer
-        .verify_x_account(&profile_id, shared_version, &x_user.username)
+        .mint_verified_x(&oauth_state.wallet_address, &x_user.username)
         .await
-        .map_err(|e| ServiceError::Internal(e.into()))?;
+        .map_err(|e| map_badge_mint_error(e, &x_user.username))?;
 
     Ok(serde_json::json!({
         "status": "verified",
@@ -435,10 +427,18 @@ mod tests {
     }
 
     #[test]
-    fn map_profile_fetch_error_is_upstream() {
-        let err = map_profile_fetch_error(anyhow::anyhow!(
-            "on-chain profile not found for 0xabc — check MYSO_RPC_URL matches the indexer network"
+    fn badge_mint_conflicts_map_to_409() {
+        assert!(matches!(
+            map_badge_mint_error(BadgeMintError::AlreadyIssued, "alice"),
+            ServiceError::Conflict(_)
         ));
-        assert!(matches!(err, ServiceError::Upstream(_)));
+        assert!(matches!(
+            map_badge_mint_error(BadgeMintError::XHandleTaken, "alice"),
+            ServiceError::Conflict(_)
+        ));
+        assert!(matches!(
+            map_badge_mint_error(BadgeMintError::WalletHasXHandle, "alice"),
+            ServiceError::Conflict(_)
+        ));
     }
 }
