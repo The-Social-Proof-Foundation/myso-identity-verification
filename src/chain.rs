@@ -76,7 +76,10 @@ impl ChainPtb {
             .read_api()
             .get_object_with_options(
                 cap_id,
-                myso_sdk::rpc_types::MySoObjectDataOptions::default(),
+                myso_sdk::rpc_types::MySoObjectDataOptions {
+                    show_owner: true,
+                    ..Default::default()
+                },
             )
             .await
             .context("fetch admin cap object")?;
