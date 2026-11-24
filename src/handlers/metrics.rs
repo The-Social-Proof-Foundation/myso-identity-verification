@@ -15,8 +15,20 @@ const PROVIDER_X: &str = "x";
 
 async fn push_x_metrics(state: &AppState, wallet_address: &str, x_user: &XUser) -> Result<(), ServiceError> {
     let (Some(dripdrop), Some(followers)) = (state.dripdrop.as_ref(), x_user.followers_count()) else {
+        tracing::warn!(
+            wallet = %wallet_address,
+            x_username = %x_user.username,
+            followers = ?x_user.followers_count(),
+            "x metrics not reported (dripdrop client or follower count missing)"
+        );
         return Ok(());
     };
+    tracing::info!(
+        wallet = %wallet_address,
+        x_username = %x_user.username,
+        followers,
+        "reporting x followers to dripdrop"
+    );
     dripdrop
         .report_social_metrics(SocialAccountMetrics {
             wallet_address: &wallet_address.to_lowercase(),

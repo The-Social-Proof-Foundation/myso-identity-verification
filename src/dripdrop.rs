@@ -31,6 +31,17 @@ pub struct SocialAccountMetrics<'a> {
     pub followers_count: u64,
 }
 
+/// `DRIPDROP_INTERNAL_URL` without a scheme (e.g. `api.testnet.dripdrop.social`) would make every
+/// request fail to build; default to https.
+fn normalize_base_url(raw: &str) -> String {
+    let trimmed = raw.trim().trim_end_matches('/');
+    if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        trimmed.to_string()
+    } else {
+        format!("https://{trimmed}")
+    }
+}
+
 pub struct DripdropInternalClient {
     http: Client,
     base_url: String,
@@ -41,7 +52,7 @@ impl DripdropInternalClient {
     pub fn new(http: Client, base_url: String, api_key: Option<String>) -> Self {
         Self {
             http,
-            base_url: base_url.trim_end_matches('/').to_string(),
+            base_url: normalize_base_url(&base_url),
             api_key,
         }
     }
@@ -73,7 +84,7 @@ impl DripdropInternalClient {
         let resp = req
             .send()
             .await
-            .map_err(|e| ServiceError::Upstream(format!("dripdrop facebook request failed: {e}")))?;
+            .map_err(|e| ServiceError::Upstream(format!("dripdrop {path} request failed: {e}")))?;
         let status = resp.status();
         if status.as_u16() == 409 {
             let message = resp
@@ -96,7 +107,7 @@ impl DripdropInternalClient {
         if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
             return Err(ServiceError::Upstream(format!(
-                "dripdrop facebook {path} error {status}: {body}"
+                "dripdrop {path} error {status}: {body}"
             )));
         }
         Ok(())
@@ -120,6 +131,12 @@ mod tests {
         assert_eq!(json["walletAddress"], "0xabc");
         assert_eq!(json["facebookId"], "99");
         assert_eq!(json["friendFacebookIds"][0], "11");
+    }
+
+    #[test]
+    fn base_url_gets_a_scheme() {
+        assert_eq!(normalize_base_url("api.testnet.dripdrop.social/"), "https://api.testnet.dripdrop.social");
+        assert_eq!(normalize_base_url(" http://localhost:3000 "), "http://localhost:3000");
     }
 
     #[test]
