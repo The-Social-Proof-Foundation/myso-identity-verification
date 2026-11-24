@@ -13,6 +13,18 @@ pub struct XUser {
     pub id: String,
     pub username: String,
     pub name: Option<String>,
+    pub public_metrics: Option<XPublicMetrics>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct XPublicMetrics {
+    pub followers_count: u64,
+}
+
+impl XUser {
+    pub fn followers_count(&self) -> Option<u64> {
+        self.public_metrics.as_ref().map(|m| m.followers_count)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -42,7 +54,7 @@ impl XApiClient {
             .http
             .get("https://api.twitter.com/2/users/me")
             .bearer_auth(access_token)
-            .query(&[("user.fields", "username,name")])
+            .query(&[("user.fields", "username,name,public_metrics")])
             .send()
             .await
             .map_err(|e| ServiceError::Upstream(format!("x users/me failed: {e}")))?;
@@ -186,6 +198,17 @@ pub fn tweet_contains_profile_link(text: &str, profile_url: &str, username: &str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn users_me_parses_public_metrics() {
+        let user: XUser = serde_json::from_str(
+            r#"{"id":"42","username":"ada","name":"Ada","public_metrics":{"followers_count":51234,"following_count":10}}"#,
+        )
+        .unwrap();
+        assert_eq!(user.followers_count(), Some(51234));
+        let bare: XUser = serde_json::from_str(r#"{"id":"42","username":"ada"}"#).unwrap();
+        assert_eq!(bare.followers_count(), None);
+    }
 
     #[test]
     fn parse_tweet_id_from_url() {

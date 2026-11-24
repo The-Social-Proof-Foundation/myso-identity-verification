@@ -300,6 +300,8 @@ async fn x_callback_inner(
     )
     .await?;
 
+    crate::handlers::metrics::report_x_metrics(state, &oauth_state.wallet_address, &x_user);
+
     // Re-linking the same handle to the same wallet is a no-op success.
     if state
         .indexer

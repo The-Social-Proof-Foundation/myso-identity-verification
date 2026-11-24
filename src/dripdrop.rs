@@ -21,6 +21,16 @@ pub struct FacebookUnlinkRequest<'a> {
     pub facebook_id: &'a str,
 }
 
+/// Follower snapshot for a verified social account (`POST /internal/social-accounts/metrics`).
+#[derive(Debug, Serialize)]
+pub struct SocialAccountMetrics<'a> {
+    pub wallet_address: &'a str,
+    pub provider: &'a str,
+    pub external_account_id: &'a str,
+    pub handle: &'a str,
+    pub followers_count: u64,
+}
+
 pub struct DripdropInternalClient {
     http: Client,
     base_url: String,
@@ -47,6 +57,10 @@ impl DripdropInternalClient {
             &FacebookUnlinkRequest { facebook_id },
         )
         .await
+    }
+
+    pub async fn report_social_metrics(&self, body: SocialAccountMetrics<'_>) -> Result<(), ServiceError> {
+        self.post_json("/internal/social-accounts/metrics", &body).await
     }
 
     async fn post_json<T: Serialize>(&self, path: &str, body: &T) -> Result<(), ServiceError> {
@@ -106,5 +120,19 @@ mod tests {
         assert_eq!(json["walletAddress"], "0xabc");
         assert_eq!(json["facebookId"], "99");
         assert_eq!(json["friendFacebookIds"][0], "11");
+    }
+
+    #[test]
+    fn metrics_body_uses_snake_case() {
+        let json = serde_json::to_value(SocialAccountMetrics {
+            wallet_address: "0xabc",
+            provider: "x",
+            external_account_id: "42",
+            handle: "ada",
+            followers_count: 50_001,
+        })
+        .unwrap();
+        assert_eq!(json["external_account_id"], "42");
+        assert_eq!(json["followers_count"], 50_001);
     }
 }

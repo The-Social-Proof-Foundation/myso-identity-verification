@@ -4,6 +4,7 @@
 mod campaigns;
 mod facebook;
 mod health;
+mod metrics;
 mod oauth;
 mod poc_claim;
 mod social_graph;
@@ -16,6 +17,7 @@ use axum::http::StatusCode;
 pub use campaigns::*;
 pub use facebook::*;
 pub use health::*;
+pub use metrics::*;
 pub use oauth::*;
 pub use poc_claim::*;
 pub use social_graph::*;

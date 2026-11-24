@@ -190,6 +190,7 @@ fn build_router(state: AppState, allowed_origins: &[String]) -> Router {
             post(handlers::poc_beneficiary_transfer_attest),
         )
         .route("/verification/x", get(handlers::get_x_verification))
+        .route("/internal/x/metrics", post(handlers::internal_x_metrics))
         .route("/social-graph/x/matches", get(handlers::x_matches))
         .route("/campaigns/share/start", post(handlers::share_start))
         .route("/campaigns/share/status", get(handlers::share_status))
